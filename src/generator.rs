@@ -63,10 +63,6 @@ pub enum SQLExpr {
 }
 
 impl SQLExpr {
-    pub fn from(e: &Expr) -> Self {
-        unimplemented!()
-    }
-
     pub fn to_expr(&self) -> Result<Expr> {
         match self {
             Self::Column(col) => Ok(Expr::Column(col.clone())),
@@ -75,7 +71,15 @@ impl SQLExpr {
                 op: op.clone(),
                 right: Box::new(right.to_expr()?),
             }),
-            _ => unimplemented!(),
+            Self::Exists { subquery, negated } => {
+                let x = SQLRelation::Select(subquery.as_ref().clone());
+                Ok(Expr::Exists {
+                    subquery: Subquery {
+                        subquery: Arc::new(x.to_logical_plan()?),
+                    },
+                    negated: *negated,
+                })
+            }
         }
     }
 }
@@ -85,6 +89,7 @@ pub struct SQLSelect {
     pub projection: Vec<SQLExpr>,
     pub filter: Option<SQLExpr>,
     pub input: Box<SQLRelation>,
+    // pub schema: DFSchemaRef,
 }
 
 #[derive(Clone)]
@@ -92,7 +97,7 @@ pub struct SQLJoin {
     pub left: Box<SQLRelation>,
     pub right: Box<SQLRelation>,
     pub on: Vec<(Column, Column)>,
-    pub filter: Option<Expr>,
+    pub filter: Option<SQLExpr>,
     pub join_type: JoinType,
     pub join_constraint: JoinConstraint,
     pub schema: DFSchemaRef,
@@ -124,6 +129,7 @@ impl SQLRelation {
                 projection,
                 filter,
                 input,
+                ..
             }) => {
                 let input = Arc::new(input.to_logical_plan()?);
                 let input_schema = input.schema();
@@ -163,16 +169,23 @@ impl SQLRelation {
                 join_type,
                 join_constraint,
                 schema,
-            }) => LogicalPlan::Join(Join {
-                left: Arc::new(left.to_logical_plan()?),
-                right: Arc::new(right.to_logical_plan()?),
-                on: on.clone(),
-                filter: filter.clone(),
-                join_type: *join_type,
-                join_constraint: *join_constraint,
-                schema: schema.clone(),
-                null_equals_null: false,
-            }),
+            }) => {
+                let filter = match filter {
+                    Some(f) => Some(f.to_expr()?),
+                    _ => None,
+                };
+
+                LogicalPlan::Join(Join {
+                    left: Arc::new(left.to_logical_plan()?),
+                    right: Arc::new(right.to_logical_plan()?),
+                    on: on.clone(),
+                    filter,
+                    join_type: *join_type,
+                    join_constraint: *join_constraint,
+                    schema: schema.clone(),
+                    null_equals_null: false,
+                })
+            }
             Self::SubqueryAlias(SQLSubqueryAlias {
                 input,
                 alias,
@@ -220,7 +233,7 @@ impl<'a> SQLRelationGenerator<'a> {
 
         let filter = match self.rng.gen_range(0..3) {
             0 => Some(self.generate_predicate(&input)?),
-            // 1 => Some(self.generate_exists()?),
+            1 => Some(self.generate_exists()?),
             _ => None,
         };
         Ok(SQLRelation::Select(SQLSelect {
@@ -232,23 +245,21 @@ impl<'a> SQLRelationGenerator<'a> {
 
     /// Generate uncorrelated subquery in the form `EXISTS (SELECT semi_join_field FROM
     /// semi_join_table)`
-    fn generate_exists(&mut self) -> Result<Expr> {
+    fn generate_exists(&mut self) -> Result<SQLExpr> {
         let semi_join_table = self.generate_select()?;
         let x = semi_join_table.schema();
         let semi_join_field = x.field(0);
-        let subquery_projection = Arc::new(LogicalPlan::Projection(Projection {
-            expr: vec![Expr::Column(semi_join_field.qualified_column())],
-            input: Arc::new(semi_join_table.to_logical_plan()?),
-            schema: Arc::new(DFSchema::new_with_metadata(
-                vec![semi_join_field.clone()],
-                HashMap::new(),
-            )?),
-            alias: None,
-        }));
-        Ok(Expr::Exists {
-            subquery: Subquery {
-                subquery: subquery_projection,
-            },
+        let subquery = Box::new(SQLSelect {
+            projection: vec![SQLExpr::Column(semi_join_field.qualified_column())],
+            input: Box::new(semi_join_table),
+            filter: None, // TODO add support for correlated subqueries here
+                          // schema: Arc::new(DFSchema::new_with_metadata(
+                          //     vec![semi_join_field.clone()],
+                          //     HashMap::new(),
+                          // )?),
+        });
+        Ok(SQLExpr::Exists {
+            subquery,
             negated: false,
         })
     }
