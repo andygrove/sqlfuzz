@@ -14,6 +14,7 @@
 
 use crate::generator::{SQLExpr, SQLJoin, SQLSelect, SQLSubqueryAlias};
 use crate::SQLRelation;
+use datafusion::arrow::compute::negate;
 use datafusion::{common::Result, logical_expr::Expr};
 
 /// Generate a SQL string from a SQLRelation struct
@@ -25,12 +26,13 @@ pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
             filter,
             input,
         }) => {
-            let expr: Vec<String> = projection.iter()
-                .map(|e| e.to_expr().and_then(|e| Ok(expr_to_sql(&e))))
+            let expr: Vec<String> = projection
+                .iter()
+                .map(|e| expr_to_sql(e, indent))
                 .collect::<Result<Vec<_>>>()?;
             let input = plan_to_sql(input, indent + 1)?;
             let where_clause = if let Some(predicate) = filter {
-                let predicate = expr_to_sql(predicate);
+                let predicate = expr_to_sql(predicate, indent)?;
                 format!("\n{}WHERE {}", indent_str, predicate)
             } else {
                 "".to_string()
@@ -71,15 +73,21 @@ pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
 }
 
 /// Generate a SQL string from an expression
-fn expr_to_sql(expr: &Expr) -> String {
-    match expr {
-        Expr::Column(col) => col.flat_name(),
-        Expr::BinaryExpr { left, op, right } => {
-            format!("{} {} {}", expr_to_sql(left), op, expr_to_sql(right))
+fn expr_to_sql(expr: &SQLExpr, indent: usize) -> Result<String> {
+    Ok(match expr {
+        SQLExpr::Column(col) => col.flat_name(),
+        SQLExpr::BinaryExpr { left, op, right } => {
+            let l = expr_to_sql(left, indent)?;
+            let r = expr_to_sql(right, indent)?;
+            format!("{} {} {}", l, op, r)
         }
-        Expr::Exists { subquery, negated } => {
-            unimplemented!()
+        SQLExpr::Exists { subquery, negated } => {
+            let sql = plan_to_sql(&SQLRelation::Select(subquery.as_ref().clone()), indent)?;
+            if *negated {
+                format!("NOT EXISTS ({})", sql)
+            } else {
+                format!("EXISTS ({})", sql)
+            }
         }
-        other => other.to_string(),
-    }
+    })
 }

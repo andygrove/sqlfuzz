@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use datafusion::common::DataFusionError;
 use datafusion::logical_plan::Subquery;
 use datafusion::{
     arrow::datatypes::SchemaRef,
@@ -32,7 +33,6 @@ use rand::Rng;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
-use datafusion::common::DataFusionError;
 
 pub struct SQLTable {
     name: String,
@@ -58,6 +58,7 @@ pub enum SQLExpr {
     },
     Exists {
         subquery: Box<SQLSelect>,
+        negated: bool,
     },
 }
 
@@ -69,32 +70,20 @@ impl SQLExpr {
     pub fn to_expr(&self) -> Result<Expr> {
         match self {
             Self::Column(col) => Ok(Expr::Column(col.clone())),
-            _ => unimplemented!()
+            Self::BinaryExpr { left, op, right } => Ok(Expr::BinaryExpr {
+                left: Box::new(left.to_expr()?),
+                op: op.clone(),
+                right: Box::new(right.to_expr()?),
+            }),
+            _ => unimplemented!(),
         }
     }
 }
 
-// impl TryInto<Expr> for SQLExpr {
-//     type Error = DataFusionError;
-//
-//     fn try_into(self) -> std::result::Result<Expr, Self::Error> {
-//         todo!()
-//     }
-// }
-//
-//
-// impl TryInto<SQLExpr> for Expr {
-//     type Error = DataFusionError;
-//
-//     fn try_into(self) -> std::result::Result<SQLExpr, Self::Error> {
-//         todo!()
-//     }
-// }
-
 #[derive(Clone)]
 pub struct SQLSelect {
     pub projection: Vec<SQLExpr>,
-    pub filter: Option<Expr>,
+    pub filter: Option<SQLExpr>,
     pub input: Box<SQLRelation>,
 }
 
@@ -159,7 +148,7 @@ impl SQLRelation {
                 });
                 if let Some(predicate) = filter {
                     LogicalPlan::Filter(Filter {
-                        predicate: predicate.clone(),
+                        predicate: predicate.to_expr()?,
                         input: Arc::new(projection),
                     })
                 } else {
@@ -264,7 +253,7 @@ impl<'a> SQLRelationGenerator<'a> {
         })
     }
 
-    fn generate_predicate(&mut self, input: &SQLRelation) -> Result<Expr> {
+    fn generate_predicate(&mut self, input: &SQLRelation) -> Result<SQLExpr> {
         let l = self.get_random_field(input.schema().as_ref());
         let r = self.get_random_field(input.schema().as_ref());
         let op = match self.rng.gen_range(0..6) {
@@ -276,10 +265,10 @@ impl<'a> SQLRelationGenerator<'a> {
             5 => Operator::NotEq,
             _ => unreachable!(),
         };
-        Ok(Expr::BinaryExpr {
-            left: Box::new(Expr::Column(l.qualified_column())),
+        Ok(SQLExpr::BinaryExpr {
+            left: Box::new(SQLExpr::Column(l.qualified_column())),
             op,
-            right: Box::new(Expr::Column(r.qualified_column())),
+            right: Box::new(SQLExpr::Column(r.qualified_column())),
         })
     }
 
