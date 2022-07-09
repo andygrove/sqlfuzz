@@ -32,6 +32,7 @@ use rand::Rng;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
+use datafusion::common::DataFusionError;
 
 pub struct SQLTable {
     name: String,
@@ -60,9 +61,39 @@ pub enum SQLExpr {
     },
 }
 
+impl SQLExpr {
+    pub fn from(e: &Expr) -> Self {
+        unimplemented!()
+    }
+
+    pub fn to_expr(&self) -> Result<Expr> {
+        match self {
+            Self::Column(col) => Ok(Expr::Column(col.clone())),
+            _ => unimplemented!()
+        }
+    }
+}
+
+// impl TryInto<Expr> for SQLExpr {
+//     type Error = DataFusionError;
+//
+//     fn try_into(self) -> std::result::Result<Expr, Self::Error> {
+//         todo!()
+//     }
+// }
+//
+//
+// impl TryInto<SQLExpr> for Expr {
+//     type Error = DataFusionError;
+//
+//     fn try_into(self) -> std::result::Result<SQLExpr, Self::Error> {
+//         todo!()
+//     }
+// }
+
 #[derive(Clone)]
 pub struct SQLSelect {
-    pub projection: Vec<Expr>,
+    pub projection: Vec<SQLExpr>,
     pub filter: Option<Expr>,
     pub input: Box<SQLRelation>,
 }
@@ -108,14 +139,20 @@ impl SQLRelation {
                 let input = Arc::new(input.to_logical_plan()?);
                 let input_schema = input.schema();
 
-                let fields = projection
+                let expr: Vec<Expr> = projection
+                    .iter()
+                    .map(|e| e.to_expr())
+                    .collect::<Result<Vec<_>>>()?;
+
+                let fields = expr
                     .iter()
                     .map(|e| e.to_field(input_schema))
                     .collect::<Result<Vec<_>>>()?;
+
                 let schema = Arc::new(DFSchema::new_with_metadata(fields, HashMap::new())?);
 
                 let projection = LogicalPlan::Projection(Projection {
-                    expr: projection.clone(),
+                    expr,
                     input: input,
                     schema,
                     alias: None,
@@ -189,7 +226,7 @@ impl<'a> SQLRelationGenerator<'a> {
             .schema()
             .fields()
             .iter()
-            .map(|f| Expr::Column(f.qualified_column()))
+            .map(|f| SQLExpr::Column(f.qualified_column()))
             .collect();
 
         let filter = match self.rng.gen_range(0..3) {
@@ -279,7 +316,7 @@ impl<'a> SQLRelationGenerator<'a> {
         let fields = plan.schema().fields().clone();
         let projection = fields
             .iter()
-            .map(|f| Expr::Column(f.qualified_column()))
+            .map(|f| SQLExpr::Column(f.qualified_column()))
             .collect();
         SQLRelation::Select(SQLSelect {
             projection,

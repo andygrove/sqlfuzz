@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::generator::{SQLJoin, SQLSelect, SQLSubqueryAlias};
+use crate::generator::{SQLExpr, SQLJoin, SQLSelect, SQLSubqueryAlias};
 use crate::SQLRelation;
 use datafusion::{common::Result, logical_expr::Expr};
 
@@ -25,7 +25,9 @@ pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
             filter,
             input,
         }) => {
-            let expr: Vec<String> = projection.iter().map(expr_to_sql).collect();
+            let expr: Vec<String> = projection.iter()
+                .map(|e| e.to_expr().and_then(|e| Ok(expr_to_sql(&e))))
+                .collect::<Result<Vec<_>>>()?;
             let input = plan_to_sql(input, indent + 1)?;
             let where_clause = if let Some(predicate) = filter {
                 let predicate = expr_to_sql(predicate);
