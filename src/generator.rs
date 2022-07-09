@@ -62,18 +62,14 @@ pub enum SQLExpr {
 
 #[derive(Clone)]
 pub struct SQLSelect {
-    projection: Vec<Expr>,
-    filter: Option<Expr>,
-    input: Box<SQLRelation>,
+    pub projection: Vec<Expr>,
+    pub filter: Option<Expr>,
+    pub input: Box<SQLRelation>,
 }
 
 #[derive(Clone)]
 pub enum SQLRelation {
-    Select {
-        projection: Vec<Expr>,
-        filter: Option<Expr>,
-        input: Box<SQLRelation>,
-    },
+    Select(SQLSelect),
     Join {
         left: Box<SQLRelation>,
         right: Box<SQLRelation>,
@@ -98,11 +94,11 @@ impl SQLRelation {
 
     pub fn to_logical_plan(&self) -> Result<LogicalPlan> {
         Ok(match self {
-            Self::Select {
+            Self::Select(SQLSelect {
                 projection,
                 filter,
                 input,
-            } => {
+            }) => {
                 let input = Arc::new(input.to_logical_plan()?);
                 let input_schema = input.schema();
 
@@ -196,11 +192,11 @@ impl<'a> SQLRelationGenerator<'a> {
             2 => None,
             _ => unreachable!(),
         };
-        Ok(SQLRelation::Select {
+        Ok(SQLRelation::Select(SQLSelect {
             projection,
             filter,
             input: Box::new(input.clone()),
-        })
+        }))
     }
 
     /// Generate uncorrelated subquery in the form `EXISTS (SELECT semi_join_field FROM
@@ -281,11 +277,11 @@ impl<'a> SQLRelationGenerator<'a> {
             .iter()
             .map(|f| Expr::Column(f.qualified_column()))
             .collect();
-        SQLRelation::Select {
+        SQLRelation::Select(SQLSelect {
             projection,
             filter: None,
             input: Box::new(plan.clone()),
-        }
+        })
     }
 
     fn alias(&mut self, plan: &SQLRelation) -> SQLRelation {

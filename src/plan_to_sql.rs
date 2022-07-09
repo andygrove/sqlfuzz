@@ -14,16 +14,17 @@
 
 use crate::SQLRelation;
 use datafusion::{common::Result, logical_expr::Expr};
+use crate::generator::SQLSelect;
 
 /// Generate a SQL string from a SQLRelation struct
 pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
     let indent_str = "  ".repeat(indent);
     match plan {
-        SQLRelation::Select {
+        SQLRelation::Select(SQLSelect {
             projection,
             filter,
             input,
-        } => {
+        }) => {
             let expr: Vec<String> = projection.iter().map(expr_to_sql).collect();
             let input = plan_to_sql(input, indent + 1)?;
             let where_clause = if let Some(predicate) = filter {
