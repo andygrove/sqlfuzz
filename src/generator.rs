@@ -83,8 +83,8 @@ impl SQLRelation {
             } => {
                 let projection = LogicalPlan::Projection(Projection {
                     expr: projection.clone(),
-                    input: Arc::new(input.to_logical_plan().clone()),
-                    schema: input.schema().clone(), // TODO this assume the project is SELECT *
+                    input: Arc::new(input.to_logical_plan()),
+                    schema: input.schema(), // TODO this assume the project is SELECT *
                     alias: None,
                 });
                 if let Some(predicate) = filter {
@@ -109,8 +109,8 @@ impl SQLRelation {
                 right: Arc::new(right.to_logical_plan()),
                 on: on.clone(),
                 filter: filter.clone(),
-                join_type: join_type.clone(),
-                join_constraint: join_constraint.clone(),
+                join_type: *join_type,
+                join_constraint: *join_constraint,
                 schema: schema.clone(),
                 null_equals_null: false,
             }),
@@ -120,7 +120,7 @@ impl SQLRelation {
                 alias,
                 schema,
             } => LogicalPlan::SubqueryAlias(SubqueryAlias {
-                input: Arc::new(input.to_logical_plan().clone()),
+                input: Arc::new(input.to_logical_plan()),
                 alias: alias.clone(),
                 schema: schema.clone(),
             }),
@@ -272,8 +272,8 @@ impl<'a> SQLRelationGenerator<'a> {
         };
 
         Ok(SQLRelation::Join {
-            left: Box::new(t1.clone()),
-            right: Box::new(t2.clone()),
+            left: Box::new(t1),
+            right: Box::new(t2),
             on,
             filter: None,
             join_type,
