@@ -60,10 +60,20 @@ pub enum SQLExpr {
     },
 }
 
+impl SQLExpr {
+    pub fn to_field(&self, schema: &DFSchema) -> Result<DFField> {
+        unimplemented!()
+    }
+
+    pub fn to_logical_expr(&self) -> Result<Expr> {
+        unimplemented!()
+    }
+}
+
 #[derive(Clone)]
 pub struct SQLSelect {
-    pub projection: Vec<Expr>,
-    pub filter: Option<Expr>,
+    pub projection: Vec<SQLExpr>,
+    pub filter: Option<SQLExpr>,
     pub input: Box<SQLRelation>,
 }
 
@@ -72,7 +82,7 @@ pub struct SQLJoin {
     pub left: Box<SQLRelation>,
     pub right: Box<SQLRelation>,
     pub on: Vec<(Column, Column)>,
-    pub filter: Option<Expr>,
+    pub filter: Option<SQLExpr>,
     pub join_type: JoinType,
     pub join_constraint: JoinConstraint,
     pub schema: DFSchemaRef,
@@ -115,14 +125,14 @@ impl SQLRelation {
                 let schema = Arc::new(DFSchema::new_with_metadata(fields, HashMap::new())?);
 
                 let projection = LogicalPlan::Projection(Projection {
-                    expr: projection.clone(),
+                    expr: projection.iter().map(SQLExpr::to_logical_expr).collect::<Result<Vec<_>>>()?,
                     input: input,
                     schema,
                     alias: None,
                 });
                 if let Some(predicate) = filter {
                     LogicalPlan::Filter(Filter {
-                        predicate: predicate.clone(),
+                        predicate: predicate.to_logical_expr()?,
                         input: Arc::new(projection),
                     })
                 } else {
@@ -141,7 +151,7 @@ impl SQLRelation {
                 left: Arc::new(left.to_logical_plan()?),
                 right: Arc::new(right.to_logical_plan()?),
                 on: on.clone(),
-                filter: filter.clone(),
+                filter: filter.map(|e| e.to_logical_expr().unwrap()),
                 join_type: *join_type,
                 join_constraint: *join_constraint,
                 schema: schema.clone(),
@@ -159,6 +169,7 @@ impl SQLRelation {
             Self::TableScan(x) => LogicalPlan::TableScan(x.clone()),
         })
     }
+
 }
 
 /// Generates random logical plans
@@ -200,14 +211,14 @@ impl<'a> SQLRelationGenerator<'a> {
         };
         Ok(SQLRelation::Select(SQLSelect {
             projection,
-            filter,
+            filter: filter .map(|e| SQLExpr::from(e).unwrap()),
             input: Box::new(input.clone()),
         }))
     }
 
     /// Generate uncorrelated subquery in the form `EXISTS (SELECT semi_join_field FROM
     /// semi_join_table)`
-    fn generate_exists(&mut self) -> Result<Expr> {
+    fn generate_exists(&mut self) -> Result<SQLExpr> {
         println!("generate_exists");
         let semi_join_table = self.generate_select()?;
         let x = semi_join_table.schema();
@@ -221,7 +232,7 @@ impl<'a> SQLRelationGenerator<'a> {
             )?),
             alias: None,
         }));
-        Ok(Expr::Exists {
+        Ok(SQLExpr::Exists {
             subquery: Subquery {
                 subquery: subquery_projection,
             },
@@ -229,7 +240,7 @@ impl<'a> SQLRelationGenerator<'a> {
         })
     }
 
-    fn generate_predicate(&mut self, input: &SQLRelation) -> Result<Expr> {
+    fn generate_predicate(&mut self, input: &SQLRelation) -> Result<SQLExpr> {
         let l = self.get_random_field(input.schema().as_ref());
         let r = self.get_random_field(input.schema().as_ref());
         let op = match self.rng.gen_range(0..6) {
