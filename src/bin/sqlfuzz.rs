@@ -78,7 +78,9 @@ async fn main() -> Result<()> {
             let mut rng = rand::thread_rng();
             let mut gen = SQLRelationGenerator::new(&mut rng, sql_tables, max_depth.unwrap_or(3));
 
-            for _ in 0..num_queries {
+            let mut generated = 0;
+
+            while generated < num_queries {
                 let plan = gen.generate_relation()?;
                 // always wrap in a final projection
                 let plan = match plan {
@@ -95,7 +97,8 @@ async fn main() -> Result<()> {
                 // SQL query planner)
                 match ctx.create_logical_plan(&sql) {
                     Ok(plan) => {
-                        println!("SQL:\n\n{};\n\n", sql);
+                        generated += 1;
+                        println!("SQL Query #{}:\n\n{};\n\n", generated, sql);
                         println!("Plan:\n\n{:?}", plan)
                     }
                     Err(e) if verbose => {

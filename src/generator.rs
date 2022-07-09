@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use datafusion::logical_plan::Subquery;
 use datafusion::{
     arrow::datatypes::SchemaRef,
     common::{Column, DFField, DFSchema, DFSchemaRef, Result},
@@ -44,6 +45,26 @@ impl SQLTable {
             schema,
         }
     }
+}
+
+#[derive(Clone)]
+pub enum SQLExpr {
+    Column(Column),
+    BinaryExpr {
+        left: Box<SQLExpr>,
+        op: Operator,
+        right: Box<SQLExpr>,
+    },
+    Exists {
+        subquery: Box<SQLSelect>,
+    },
+}
+
+#[derive(Clone)]
+pub struct SQLSelect {
+    projection: Vec<Expr>,
+    filter: Option<Expr>,
+    input: Box<SQLRelation>,
 }
 
 #[derive(Clone)]
@@ -168,15 +189,41 @@ impl<'a> SQLRelationGenerator<'a> {
             .iter()
             .map(|f| Expr::Column(f.qualified_column()))
             .collect();
-        let filter = match self.rng.gen_range(0..2) {
+
+        let filter = match self.rng.gen_range(0..3) {
             0 => Some(self.generate_predicate(&input)?),
-            1 => None,
+            1 => Some(self.generate_exists()?),
+            2 => None,
             _ => unreachable!(),
         };
         Ok(SQLRelation::Select {
             projection,
             filter,
             input: Box::new(input.clone()),
+        })
+    }
+
+    /// Generate uncorrelated subquery in the form `EXISTS (SELECT semi_join_field FROM
+    /// semi_join_table)`
+    fn generate_exists(&mut self) -> Result<Expr> {
+        println!("generate_exists");
+        let semi_join_table = self.generate_select()?;
+        let x = semi_join_table.schema();
+        let semi_join_field = x.field(0);
+        let subquery_projection = Arc::new(LogicalPlan::Projection(Projection {
+            expr: vec![Expr::Column(semi_join_field.qualified_column())],
+            input: Arc::new(semi_join_table.to_logical_plan()?),
+            schema: Arc::new(DFSchema::new_with_metadata(
+                vec![semi_join_field.clone()],
+                HashMap::new(),
+            )?),
+            alias: None,
+        }));
+        Ok(Expr::Exists {
+            subquery: Subquery {
+                subquery: subquery_projection,
+            },
+            negated: false,
         })
     }
 

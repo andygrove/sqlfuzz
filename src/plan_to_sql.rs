@@ -74,6 +74,9 @@ fn expr_to_sql(expr: &Expr) -> String {
         Expr::BinaryExpr { left, op, right } => {
             format!("{} {} {}", expr_to_sql(left), op, expr_to_sql(right))
         }
+        Expr::Exists { subquery, negated } => {
+            unimplemented!()
+        }
         other => other.to_string(),
     }
 }
