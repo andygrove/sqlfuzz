@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
                     let logical_plan = plan.to_logical_plan();
                     println!("Input plan:\n{:?}", logical_plan);
                 }
-                let sql = plan_to_sql(&plan)?;
+                let sql = plan_to_sql(&plan, 0)?;
 
                 // see if we produced something valid or not (according to DataFusion's
                 // SQL query planner)
@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
                         println!("Plan:\n\n{:?}", plan)
                     }
                     Err(e) if verbose => {
-                        println!("SQL: {};\n\n", sql);
+                        println!("SQL:\n\n{};\n\n", sql);
                         println!("SQL was not valid: {:?}", e)
                     }
                     _ => {
