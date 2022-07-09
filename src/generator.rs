@@ -194,9 +194,8 @@ impl<'a> SQLRelationGenerator<'a> {
 
         let filter = match self.rng.gen_range(0..3) {
             0 => Some(self.generate_predicate(&input)?),
-            1 => Some(self.generate_exists()?),
-            2 => None,
-            _ => unreachable!(),
+            // 1 => Some(self.generate_exists()?),
+            _ => None,
         };
         Ok(SQLRelation::Select(SQLSelect {
             projection,
@@ -208,7 +207,6 @@ impl<'a> SQLRelationGenerator<'a> {
     /// Generate uncorrelated subquery in the form `EXISTS (SELECT semi_join_field FROM
     /// semi_join_table)`
     fn generate_exists(&mut self) -> Result<Expr> {
-        println!("generate_exists");
         let semi_join_table = self.generate_select()?;
         let x = semi_join_table.schema();
         let semi_join_field = x.field(0);
@@ -402,7 +400,7 @@ mod test {
     #[test]
     fn test() -> Result<()> {
         let mut rng = rand::thread_rng();
-        let mut gen = SQLRelationGenerator::new(&mut rng, test_tables()?);
+        let mut gen = SQLRelationGenerator::new(&mut rng, test_tables()?, 5);
         let _plan = gen.generate_relation()?;
         Ok(())
     }

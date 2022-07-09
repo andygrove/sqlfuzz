@@ -5,7 +5,7 @@ Generate random (and sometimes valid!) SQL queries from any local datasets in Pa
 ## Command-line Usage
 
 ```bash
-$ cargo run -- generate --table ./testdata/test.csv
+$ cargo run -- generate --table ./testdata/test.csv --count 5 --max-depth 5
 ```
 
 ## Example Generated Query

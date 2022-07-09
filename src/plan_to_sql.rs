@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::generator::{SQLJoin, SQLSelect, SQLSubqueryAlias};
 use crate::SQLRelation;
 use datafusion::{common::Result, logical_expr::Expr};
-use crate::generator::{SQLJoin, SQLSelect, SQLSubqueryAlias};
 
 /// Generate a SQL string from a SQLRelation struct
 pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
