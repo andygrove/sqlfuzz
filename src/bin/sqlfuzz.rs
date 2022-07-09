@@ -19,7 +19,7 @@ use datafusion::{
         AvroReadOptions, CsvReadOptions, NdJsonReadOptions, ParquetReadOptions, SessionContext,
     },
 };
-use sqlfuzz::{plan_to_sql, SQLRelation, SQLRelationGenerator, SQLTable};
+use sqlfuzz::{plan_to_sql, SQLRelationGenerator, SQLTable};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -81,12 +81,7 @@ async fn main() -> Result<()> {
             let mut generated = 0;
 
             while generated < num_queries {
-                let plan = gen.generate_relation()?;
-                // always wrap in a final projection
-                let plan = match plan {
-                    SQLRelation::Select { .. } => plan.clone(),
-                    _ => gen.select_star(&plan),
-                };
+                let plan = gen.generate_select()?;
                 if verbose {
                     let logical_plan = plan.to_logical_plan();
                     println!("Input plan:\n{:?}", logical_plan);

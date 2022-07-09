@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use datafusion::common::DataFusionError;
 use datafusion::logical_plan::Subquery;
 use datafusion::{
     arrow::datatypes::SchemaRef,
@@ -260,7 +259,7 @@ impl<'a> SQLRelationGenerator<'a> {
         });
         Ok(SQLExpr::Exists {
             subquery,
-            negated: false,
+            negated: false, // TODO
         })
     }
 
@@ -295,10 +294,10 @@ impl<'a> SQLRelationGenerator<'a> {
             self.generate_table_scan()
         } else {
             self.depth += 1;
-            let plan = match self.rng.gen_range(0..3) {
+            let plan = match self.rng.gen_range(0..2) {
                 0 => self.generate_table_scan(),
                 1 => self.generate_join(),
-                2 => self.generate_select(),
+                //2 => self.generate_select(),
                 _ => unreachable!(),
             };
             self.depth -= 1;

@@ -14,8 +14,7 @@
 
 use crate::generator::{SQLExpr, SQLJoin, SQLSelect, SQLSubqueryAlias};
 use crate::SQLRelation;
-use datafusion::arrow::compute::negate;
-use datafusion::{common::Result, logical_expr::Expr};
+use datafusion::common::Result;
 
 /// Generate a SQL string from a SQLRelation struct
 pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
@@ -38,7 +37,7 @@ pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
                 "".to_string()
             };
             Ok(format!(
-                "SELECT {}\n{}FROM {}{}",
+                "SELECT {}\n{}FROM ({}){}",
                 expr.join(", "),
                 indent_str,
                 input,
