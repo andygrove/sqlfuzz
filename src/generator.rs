@@ -22,13 +22,14 @@ use datafusion::{
         logical_plan::{
             Filter, Join, JoinConstraint, JoinType, Projection, SubqueryAlias, TableScan,
         },
-        Expr, LogicalPlan, Operator,
+        Expr, ExprSchemable, LogicalPlan, Operator,
     },
     physical_plan::ExecutionPlan,
 };
 use rand::rngs::ThreadRng;
 use rand::Rng;
 use std::any::Any;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct SQLTable {
@@ -71,20 +72,29 @@ pub enum SQLRelation {
 
 impl SQLRelation {
     pub fn schema(&self) -> DFSchemaRef {
-        self.to_logical_plan().schema().clone()
+        self.to_logical_plan().unwrap().schema().clone()
     }
 
-    pub fn to_logical_plan(&self) -> LogicalPlan {
-        match self {
+    pub fn to_logical_plan(&self) -> Result<LogicalPlan> {
+        Ok(match self {
             Self::Select {
                 projection,
                 filter,
                 input,
             } => {
+                let input = Arc::new(input.to_logical_plan()?);
+                let input_schema = input.schema();
+
+                let fields = projection
+                    .iter()
+                    .map(|e| e.to_field(input_schema))
+                    .collect::<Result<Vec<_>>>()?;
+                let schema = Arc::new(DFSchema::new_with_metadata(fields, HashMap::new())?);
+
                 let projection = LogicalPlan::Projection(Projection {
                     expr: projection.clone(),
-                    input: Arc::new(input.to_logical_plan()),
-                    schema: input.schema(), // TODO this assume the project is SELECT *
+                    input: input,
+                    schema,
                     alias: None,
                 });
                 if let Some(predicate) = filter {
@@ -105,8 +115,8 @@ impl SQLRelation {
                 join_constraint,
                 schema,
             } => LogicalPlan::Join(Join {
-                left: Arc::new(left.to_logical_plan()),
-                right: Arc::new(right.to_logical_plan()),
+                left: Arc::new(left.to_logical_plan()?),
+                right: Arc::new(right.to_logical_plan()?),
                 on: on.clone(),
                 filter: filter.clone(),
                 join_type: *join_type,
@@ -120,11 +130,11 @@ impl SQLRelation {
                 alias,
                 schema,
             } => LogicalPlan::SubqueryAlias(SubqueryAlias {
-                input: Arc::new(input.to_logical_plan()),
+                input: Arc::new(input.to_logical_plan()?),
                 alias: alias.clone(),
                 schema: schema.clone(),
             }),
-        }
+        })
     }
 }
 
@@ -152,7 +162,7 @@ impl<'a> SQLRelationGenerator<'a> {
         let input = self.generate_relation()?;
         let input = self.alias(&input);
         let projection = input
-            .to_logical_plan()
+            .to_logical_plan()?
             .schema()
             .fields()
             .iter()
