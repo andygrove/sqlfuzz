@@ -14,7 +14,7 @@
 
 use crate::SQLRelation;
 use datafusion::{common::Result, logical_expr::Expr};
-use crate::generator::SQLSelect;
+use crate::generator::{SQLJoin, SQLSelect, SQLSubqueryAlias};
 
 /// Generate a SQL string from a SQLRelation struct
 pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
@@ -42,13 +42,13 @@ pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
             ))
         }
         SQLRelation::TableScan(scan) => Ok(scan.table_name.clone()),
-        SQLRelation::Join {
+        SQLRelation::Join(SQLJoin {
             left,
             right,
             on,
             join_type,
             ..
-        } => {
+        }) => {
             let l = plan_to_sql(left, indent + 1)?;
             let r = plan_to_sql(right, indent + 1)?;
             let join_condition = on
@@ -61,7 +61,7 @@ pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
                 indent_str, l, indent_str, join_type, indent_str, r, indent_str, join_condition
             ))
         }
-        SQLRelation::SubqueryAlias { input, alias, .. } => {
+        SQLRelation::SubqueryAlias(SQLSubqueryAlias { input, alias, .. }) => {
             let sql = plan_to_sql(input, indent + 1)?;
             Ok(format!("({}) {}", sql, alias))
         }

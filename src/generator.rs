@@ -68,23 +68,29 @@ pub struct SQLSelect {
 }
 
 #[derive(Clone)]
+pub struct SQLJoin {
+    pub left: Box<SQLRelation>,
+    pub right: Box<SQLRelation>,
+    pub on: Vec<(Column, Column)>,
+    pub filter: Option<Expr>,
+    pub join_type: JoinType,
+    pub join_constraint: JoinConstraint,
+    pub schema: DFSchemaRef,
+}
+
+#[derive(Clone)]
+pub struct SQLSubqueryAlias {
+    pub input: Box<SQLRelation>,
+    pub alias: String,
+    pub schema: DFSchemaRef,
+}
+
+#[derive(Clone)]
 pub enum SQLRelation {
     Select(SQLSelect),
-    Join {
-        left: Box<SQLRelation>,
-        right: Box<SQLRelation>,
-        on: Vec<(Column, Column)>,
-        filter: Option<Expr>,
-        join_type: JoinType,
-        join_constraint: JoinConstraint,
-        schema: DFSchemaRef,
-    },
+    Join(SQLJoin),
+    SubqueryAlias(SQLSubqueryAlias),
     TableScan(TableScan),
-    SubqueryAlias {
-        input: Box<SQLRelation>,
-        alias: String,
-        schema: DFSchemaRef,
-    },
 }
 
 impl SQLRelation {
@@ -123,7 +129,7 @@ impl SQLRelation {
                     projection
                 }
             }
-            Self::Join {
+            Self::Join(SQLJoin {
                 left,
                 right,
                 on,
@@ -131,7 +137,7 @@ impl SQLRelation {
                 join_type,
                 join_constraint,
                 schema,
-            } => LogicalPlan::Join(Join {
+            }) => LogicalPlan::Join(Join {
                 left: Arc::new(left.to_logical_plan()?),
                 right: Arc::new(right.to_logical_plan()?),
                 on: on.clone(),
@@ -141,16 +147,16 @@ impl SQLRelation {
                 schema: schema.clone(),
                 null_equals_null: false,
             }),
-            Self::TableScan(x) => LogicalPlan::TableScan(x.clone()),
-            Self::SubqueryAlias {
+            Self::SubqueryAlias(SQLSubqueryAlias {
                 input,
                 alias,
                 schema,
-            } => LogicalPlan::SubqueryAlias(SubqueryAlias {
+            }) => LogicalPlan::SubqueryAlias(SubqueryAlias {
                 input: Arc::new(input.to_logical_plan()?),
                 alias: alias.clone(),
                 schema: schema.clone(),
             }),
+            Self::TableScan(x) => LogicalPlan::TableScan(x.clone()),
         })
     }
 }
@@ -291,11 +297,11 @@ impl<'a> SQLRelationGenerator<'a> {
                 let alias = self.generate_alias();
                 let schema = plan.schema().as_ref().clone();
                 let schema = schema.replace_qualifier(&alias);
-                SQLRelation::SubqueryAlias {
+                SQLRelation::SubqueryAlias(SQLSubqueryAlias {
                     input: Box::new(plan.clone()),
                     alias,
                     schema: Arc::new(schema),
-                }
+                })
             }
         }
     }
@@ -324,7 +330,7 @@ impl<'a> SQLRelationGenerator<'a> {
             _ => unreachable!(),
         };
 
-        Ok(SQLRelation::Join {
+        Ok(SQLRelation::Join(SQLJoin {
             left: Box::new(t1),
             right: Box::new(t2),
             on,
@@ -332,7 +338,7 @@ impl<'a> SQLRelationGenerator<'a> {
             join_type,
             join_constraint: JoinConstraint::On,
             schema: Arc::new(schema),
-        })
+        }))
     }
 
     fn generate_table_scan(&mut self) -> Result<SQLRelation> {
