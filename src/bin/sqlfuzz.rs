@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use datafusion::logical_plan::JoinType;
 use datafusion::{
     common::{DataFusionError, Result},
     dataframe::DataFrame,
@@ -19,7 +20,7 @@ use datafusion::{
         AvroReadOptions, CsvReadOptions, NdJsonReadOptions, ParquetReadOptions, SessionContext,
     },
 };
-use sqlfuzz::{plan_to_sql, SQLRelationGenerator, SQLTable};
+use sqlfuzz::{plan_to_sql, FuzzConfig, SQLRelationGenerator, SQLTable};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -76,7 +77,20 @@ async fn main() -> Result<()> {
             // generate a random SQL query
             let num_queries = count.unwrap_or(10);
             let mut rng = rand::thread_rng();
-            let mut gen = SQLRelationGenerator::new(&mut rng, sql_tables, max_depth.unwrap_or(3));
+
+            let fuzz_config = FuzzConfig {
+                join_types: vec![
+                    JoinType::Inner,
+                    JoinType::Left,
+                    JoinType::Right,
+                    JoinType::Full,
+                    JoinType::Anti,
+                    JoinType::Semi,
+                ],
+                max_depth: max_depth.unwrap_or(5),
+            };
+
+            let mut gen = SQLRelationGenerator::new(&mut rng, sql_tables, fuzz_config);
 
             let mut generated = 0;
 
@@ -91,10 +105,10 @@ async fn main() -> Result<()> {
                 // see if we produced something valid or not (according to DataFusion's
                 // SQL query planner)
                 match ctx.create_logical_plan(&sql) {
-                    Ok(plan) => {
+                    Ok(_plan) => {
                         generated += 1;
                         println!("SQL Query #{}:\n\n{};\n\n", generated, sql);
-                        println!("Plan:\n\n{:?}", plan)
+                        // println!("Plan:\n\n{:?}", plan)
                     }
                     Err(e) if verbose => {
                         println!("SQL:\n\n{};\n\n", sql);

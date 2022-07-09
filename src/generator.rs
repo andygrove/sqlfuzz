@@ -199,40 +199,59 @@ impl SQLRelation {
     }
 }
 
+pub struct FuzzConfig {
+    /// Specify which join types should be used in generated queries. Leave empty to disable joins.
+    pub join_types: Vec<JoinType>,
+    /// Maximum query plan tree depth
+    pub max_depth: usize,
+}
+
 /// Generates random logical plans
 pub struct SQLRelationGenerator<'a> {
     tables: Vec<SQLTable>,
     rng: &'a mut ThreadRng,
     id_gen: usize,
     depth: usize,
-    max_depth: usize,
+    config: FuzzConfig,
+    semi_join: bool,
+    anti_join: bool,
 }
 
 impl<'a> SQLRelationGenerator<'a> {
-    pub fn new(rng: &'a mut ThreadRng, tables: Vec<SQLTable>, max_depth: usize) -> Self {
+    pub fn new(rng: &'a mut ThreadRng, tables: Vec<SQLTable>, config: FuzzConfig) -> Self {
+        let semi_join = config.join_types.contains(&JoinType::Semi);
+        let anti_join = config.join_types.contains(&JoinType::Anti);
         Self {
             tables,
             rng,
             id_gen: 0,
             depth: 0,
-            max_depth,
+            config,
+            semi_join,
+            anti_join,
         }
     }
 
     pub fn generate_select(&mut self) -> Result<SQLRelation> {
         let input = self.generate_relation()?;
         let input = self.alias(&input);
-        let projection = input
+        let columns: Vec<Column> = input
             .to_logical_plan()?
             .schema()
             .fields()
             .iter()
-            .map(|f| SQLExpr::Column(f.qualified_column()))
+            .map(|f| f.qualified_column())
+            .collect();
+
+        let projection = columns
+            .iter()
+            .map(|col| SQLExpr::Column(col.clone()))
             .collect();
 
         let filter = match self.rng.gen_range(0..3) {
             0 => Some(self.generate_predicate(&input)?),
-            1 => Some(self.generate_exists()?),
+            1 if self.semi_join => Some(self.generate_exists(false, &columns)?),
+            2 if self.anti_join => Some(self.generate_exists(true, &columns)?),
             _ => None,
         };
         Ok(SQLRelation::Select(SQLSelect {
@@ -244,23 +263,34 @@ impl<'a> SQLRelationGenerator<'a> {
 
     /// Generate uncorrelated subquery in the form `EXISTS (SELECT semi_join_field FROM
     /// semi_join_table)`
-    fn generate_exists(&mut self) -> Result<SQLExpr> {
+    fn generate_exists(&mut self, negated: bool, outer_columns: &Vec<Column>) -> Result<SQLExpr> {
         let semi_join_table = self.generate_select()?;
         let x = semi_join_table.schema();
         let semi_join_field = x.field(0);
+
+        // TODO randomize the selection
+        let semi_join_schema = semi_join_table.schema();
+        let inner_field = semi_join_schema.field(0);
+        let outer_field = &outer_columns[0];
+
+        let filter = SQLExpr::BinaryExpr {
+            left: Box::new(SQLExpr::Column(Column::from_qualified_name(
+                &inner_field.qualified_name(),
+            ))),
+            op: Operator::Eq,
+            right: Box::new(SQLExpr::Column(outer_field.clone())),
+        };
+
         let subquery = Box::new(SQLSelect {
             projection: vec![SQLExpr::Column(semi_join_field.qualified_column())],
             input: Box::new(semi_join_table),
-            filter: None, // TODO add support for correlated subqueries here
-                          // schema: Arc::new(DFSchema::new_with_metadata(
-                          //     vec![semi_join_field.clone()],
-                          //     HashMap::new(),
-                          // )?),
+            filter: Some(filter),
+            // schema: Arc::new(DFSchema::new_with_metadata(
+            //     vec![semi_join_field.clone()],
+            //     HashMap::new(),
+            // )?),
         });
-        Ok(SQLExpr::Exists {
-            subquery,
-            negated: false, // TODO
-        })
+        Ok(SQLExpr::Exists { subquery, negated })
     }
 
     fn generate_predicate(&mut self, input: &SQLRelation) -> Result<SQLExpr> {
@@ -289,7 +319,7 @@ impl<'a> SQLRelationGenerator<'a> {
     }
 
     pub fn generate_relation(&mut self) -> Result<SQLRelation> {
-        if self.depth == self.max_depth {
+        if self.depth == self.config.max_depth {
             // generate a leaf node to prevent us recursing forever
             self.generate_table_scan()
         } else {
@@ -426,6 +456,7 @@ impl TableProvider for FakeTableProvider {
 
 #[cfg(test)]
 mod test {
+    use crate::generator::FuzzConfig;
     use crate::{SQLRelationGenerator, SQLTable};
     use datafusion::{
         arrow::datatypes::DataType,
@@ -436,7 +467,13 @@ mod test {
     #[test]
     fn test() -> Result<()> {
         let mut rng = rand::thread_rng();
-        let mut gen = SQLRelationGenerator::new(&mut rng, test_tables()?, 5);
+        let config = FuzzConfig {
+            join_types: vec![],
+            max_depth: 5,
+            semi_joins: false,
+            anti_joins: false,
+        };
+        let mut gen = SQLRelationGenerator::new(&mut rng, test_tables()?, config);
         let _plan = gen.generate_relation()?;
         Ok(())
     }

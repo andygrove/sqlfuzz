@@ -15,5 +15,5 @@
 mod generator;
 mod plan_to_sql;
 
-pub use generator::{SQLRelation, SQLRelationGenerator, SQLTable};
+pub use generator::{FuzzConfig, SQLRelation, SQLRelationGenerator, SQLTable};
 pub use plan_to_sql::plan_to_sql;
