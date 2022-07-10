@@ -199,6 +199,7 @@ impl SQLRelation {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct FuzzConfig {
     /// Specify which join types should be used in generated queries. Leave empty to disable joins.
     pub join_types: Vec<JoinType>,
@@ -221,6 +222,13 @@ impl<'a> SQLRelationGenerator<'a> {
     pub fn new(rng: &'a mut ThreadRng, tables: Vec<SQLTable>, config: FuzzConfig) -> Self {
         let semi_join = config.join_types.contains(&JoinType::Semi);
         let anti_join = config.join_types.contains(&JoinType::Anti);
+        let mut config = config.clone();
+        config.join_types = config
+            .join_types
+            .iter()
+            .cloned()
+            .filter(|j| *j != JoinType::Anti && *j != JoinType::Semi)
+            .collect();
         Self {
             tables,
             rng,
@@ -324,11 +332,10 @@ impl<'a> SQLRelationGenerator<'a> {
             self.generate_table_scan()
         } else {
             self.depth += 1;
-            let plan = match self.rng.gen_range(0..2) {
-                0 => self.generate_table_scan(),
-                1 => self.generate_join(),
+            let plan = match self.rng.gen_range(0..4) {
+                0 if !self.config.join_types.is_empty() => self.generate_join(),
+                _ => self.generate_table_scan(),
                 //2 => self.generate_select(),
-                _ => unreachable!(),
             };
             self.depth -= 1;
             plan
@@ -386,20 +393,15 @@ impl<'a> SQLRelationGenerator<'a> {
                 .qualified_column(),
         )];
 
-        let join_type = match self.rng.gen_range(0..4) {
-            0 => JoinType::Inner,
-            1 => JoinType::Left,
-            2 => JoinType::Right,
-            3 => JoinType::Full,
-            _ => unreachable!(),
-        };
+        let join_type =
+            &self.config.join_types[self.rng.gen_range(0..self.config.join_types.len())];
 
         Ok(SQLRelation::Join(SQLJoin {
             left: Box::new(t1),
             right: Box::new(t2),
             on,
             filter: None,
-            join_type,
+            join_type: join_type.clone(),
             join_constraint: JoinConstraint::On,
             schema: Arc::new(schema),
         }))

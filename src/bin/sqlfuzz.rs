@@ -29,100 +29,98 @@ use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "sqlfuzz", about = "sqlfuzz SQL query generator")]
-enum Command {
-    Generate {
-        #[structopt(parse(from_os_str), long)]
-        table: Vec<PathBuf>,
-        #[structopt(short, long)]
-        count: Option<usize>,
-        #[structopt(short, long)]
-        max_depth: Option<usize>,
-        #[structopt(short, long)]
-        verbose: bool,
-    },
+struct Config {
+    #[structopt(parse(from_os_str), long, required = true, multiple = true)]
+    table: Vec<PathBuf>,
+    #[structopt(short, long, required = false, multiple = true)]
+    join_type: Vec<String>,
+    #[structopt(short, long, default_value = "10")]
+    count: usize,
+    #[structopt(short, long, default_value = "5")]
+    max_depth: usize,
+    #[structopt(short, long)]
+    verbose: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cmd = Command::from_args();
-    match cmd {
-        Command::Generate {
-            table,
-            verbose,
-            count,
-            max_depth,
-        } => {
-            if table.is_empty() {
-                panic!("must provide tables to generate queries for");
+    let config = Config::from_args();
+    if config.table.is_empty() {
+        panic!("must provide tables to generate queries for");
+    }
+
+    let mut join_types = vec![];
+    for jt in config.join_type {
+        let jt = match jt.as_str() {
+            "anti" => JoinType::Anti,
+            "semi" => JoinType::Semi,
+            "left" => JoinType::Left,
+            "right" => JoinType::Right,
+            "full" => JoinType::Full,
+            "inner" => JoinType::Inner,
+            other => panic!("invalid join type: {}", other),
+        };
+        join_types.push(jt);
+    }
+
+    // register tables with context
+    let ctx = SessionContext::new();
+    let mut sql_tables: Vec<SQLTable> = vec![];
+    for path in &config.table {
+        let table_name = path
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .ok_or_else(|| DataFusionError::Internal("Invalid filename".to_string()))?;
+        let table_name = sanitize_table_name(table_name);
+        let filename = parse_filename(path)?;
+        if config.verbose {
+            println!("Registering table '{}' for {}", table_name, path.display());
+        }
+        let df = register_table(&ctx, &table_name, filename).await?;
+        sql_tables.push(SQLTable::new(&table_name, df.schema().clone()));
+    }
+
+    // generate a random SQL query
+    let num_queries = config.count;
+    let mut rng = rand::thread_rng();
+
+    let fuzz_config = FuzzConfig {
+        join_types,
+        max_depth: config.max_depth,
+    };
+
+    let mut gen = SQLRelationGenerator::new(&mut rng, sql_tables, fuzz_config);
+
+    let mut generated = 0;
+
+    while generated < num_queries {
+        let plan = gen.generate_select()?;
+        if config.verbose {
+            let logical_plan = plan.to_logical_plan();
+            println!("Input plan:\n{:?}", logical_plan);
+        }
+        let sql = plan_to_sql(&plan, 0)?;
+
+        // see if we produced something valid or not (according to DataFusion's
+        // SQL query planner)
+        match ctx.create_logical_plan(&sql) {
+            Ok(_plan) => {
+                generated += 1;
+                println!("SQL Query #{}:\n\n{};\n\n", generated, sql);
+                // println!("Plan:\n\n{:?}", plan)
             }
-
-            // register tables with context
-            let ctx = SessionContext::new();
-            let mut sql_tables: Vec<SQLTable> = vec![];
-            for path in &table {
-                let table_name = path
-                    .file_stem()
-                    .unwrap()
-                    .to_str()
-                    .ok_or_else(|| DataFusionError::Internal("Invalid filename".to_string()))?;
-                let table_name = sanitize_table_name(table_name);
-                let filename = parse_filename(path)?;
-                if verbose {
-                    println!("Registering table '{}' for {}", table_name, path.display());
-                }
-                let df = register_table(&ctx, &table_name, filename).await?;
-                sql_tables.push(SQLTable::new(&table_name, df.schema().clone()));
+            Err(e) if config.verbose => {
+                println!("SQL:\n\n{};\n\n", sql);
+                println!("SQL was not valid: {:?}", e)
             }
-
-            // generate a random SQL query
-            let num_queries = count.unwrap_or(10);
-            let mut rng = rand::thread_rng();
-
-            let fuzz_config = FuzzConfig {
-                join_types: vec![
-                    JoinType::Inner,
-                    JoinType::Left,
-                    JoinType::Right,
-                    JoinType::Full,
-                    JoinType::Anti,
-                    JoinType::Semi,
-                ],
-                max_depth: max_depth.unwrap_or(5),
-            };
-
-            let mut gen = SQLRelationGenerator::new(&mut rng, sql_tables, fuzz_config);
-
-            let mut generated = 0;
-
-            while generated < num_queries {
-                let plan = gen.generate_select()?;
-                if verbose {
-                    let logical_plan = plan.to_logical_plan();
-                    println!("Input plan:\n{:?}", logical_plan);
-                }
-                let sql = plan_to_sql(&plan, 0)?;
-
-                // see if we produced something valid or not (according to DataFusion's
-                // SQL query planner)
-                match ctx.create_logical_plan(&sql) {
-                    Ok(_plan) => {
-                        generated += 1;
-                        println!("SQL Query #{}:\n\n{};\n\n", generated, sql);
-                        // println!("Plan:\n\n{:?}", plan)
-                    }
-                    Err(e) if verbose => {
-                        println!("SQL:\n\n{};\n\n", sql);
-                        println!("SQL was not valid: {:?}", e)
-                    }
-                    _ => {
-                        // ignore
-                    }
-                }
+            _ => {
+                // ignore
             }
-
-            Ok(())
         }
     }
+
+    Ok(())
 }
 
 fn parse_filename(filename: &Path) -> Result<&str> {
