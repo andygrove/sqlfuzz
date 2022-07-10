@@ -2,7 +2,18 @@
 
 `sqlfuzz` is a command-line tool and library for generating random data files and SQL queries.
 
-For background information on SQL fuzzing, I recommend reading the [SparkFuzz](https://ir.cwi.nl/pub/30222/3395032.3395327.pdf) paper.
+For background information on SQL fuzzing, I recommend reading the paper [SparkFuzz: Searching Correctness Regressions in
+Modern Query Engines](https://ir.cwi.nl/pub/30222/3395032.3395327.pdf).
+
+## Status
+
+- [x] Generate random SQL queries against any provided input files
+- [x] Generate randomized data files
+- [ ] Provide tooling to execute queries and capture results
+  - [ ] DataFusion
+  - [ ] Apache Spark
+  - [ ] PostgreSQL
+- [ ] Provide tooling to compare two sets of results and report differences
 
 ## Installation
 
