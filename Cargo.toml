@@ -4,9 +4,9 @@ description = "Generate random (and sometimes valid!) queries from any local Par
 homepage = "https://github.com/andygrove/sqlfuzz"
 repository = "https://github.com/andygrove/sqlfuzz"
 authors = ["Andy Grove <andygrove73@gmail.com>"]
-keywords = [ "sql", "fuzz", "fuzzer" ]
+keywords = [ "sql", "fuzzer" ]
 license = "Apache-2.0"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 
 [dependencies]

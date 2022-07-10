@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod generator;
+mod fuzz_data;
+mod fuzz_sql;
 mod plan_to_sql;
 
-pub use generator::{FuzzConfig, SQLRelation, SQLRelationGenerator, SQLTable};
+pub use fuzz_data::generate_batch;
+pub use fuzz_sql::{FuzzConfig, SQLRelation, SQLRelationGenerator, SQLTable};
 pub use plan_to_sql::plan_to_sql;

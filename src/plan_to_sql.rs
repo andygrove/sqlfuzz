@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::generator::{SQLExpr, SQLJoin, SQLSelect, SQLSubqueryAlias};
+use crate::fuzz_sql::{SQLExpr, SQLJoin, SQLSelect, SQLSubqueryAlias};
 use crate::SQLRelation;
 use datafusion::common::Result;
 
