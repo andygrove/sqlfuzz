@@ -49,6 +49,10 @@ impl SQLTable {
 
 #[derive(Clone)]
 pub enum SQLExpr {
+    Alias {
+        expr: Box<SQLExpr>,
+        alias: String,
+    },
     Column(Column),
     BinaryExpr {
         left: Box<SQLExpr>,
@@ -64,6 +68,9 @@ pub enum SQLExpr {
 impl SQLExpr {
     pub fn to_expr(&self) -> Result<Expr> {
         match self {
+            Self::Alias { expr, alias } => {
+                Ok(Expr::Alias(Box::new(expr.to_expr()?), alias.to_string()))
+            }
             Self::Column(col) => Ok(Expr::Column(col.clone())),
             Self::BinaryExpr { left, op, right } => Ok(Expr::BinaryExpr {
                 left: Box::new(left.to_expr()?),
@@ -216,6 +223,8 @@ pub struct SQLRelationGenerator<'a> {
     config: FuzzConfig,
     semi_join: bool,
     anti_join: bool,
+    column_alias_prefix: String,
+    table_alias_prefix: String,
 }
 
 impl<'a> SQLRelationGenerator<'a> {
@@ -237,6 +246,8 @@ impl<'a> SQLRelationGenerator<'a> {
             config,
             semi_join,
             anti_join,
+            column_alias_prefix: "__c".to_string(),
+            table_alias_prefix: "__t".to_string(),
         }
     }
 
@@ -342,17 +353,26 @@ impl<'a> SQLRelationGenerator<'a> {
         }
     }
 
-    fn generate_alias(&mut self) -> String {
+    fn generate_table_alias(&mut self) -> String {
         let id = self.id_gen;
         self.id_gen += 1;
-        format!("t{}", id)
+        format!("{}{}", &self.table_alias_prefix, id)
+    }
+
+    fn generate_column_alias(&mut self) -> String {
+        let id = self.id_gen;
+        self.id_gen += 1;
+        format!("{}{}", &self.column_alias_prefix, id)
     }
 
     pub fn select_star(&mut self, plan: &SQLRelation) -> SQLRelation {
         let fields = plan.schema().fields().clone();
         let projection = fields
             .iter()
-            .map(|f| SQLExpr::Column(f.qualified_column()))
+            .map(|f| SQLExpr::Alias {
+                expr: Box::new(SQLExpr::Column(f.qualified_column())),
+                alias: self.generate_column_alias(),
+            })
             .collect();
         SQLRelation::Select(SQLSelect {
             projection,
@@ -365,7 +385,7 @@ impl<'a> SQLRelationGenerator<'a> {
         match plan {
             SQLRelation::SubqueryAlias { .. } => plan.clone(),
             _ => {
-                let alias = self.generate_alias();
+                let alias = self.generate_table_alias();
                 let schema = plan.schema().as_ref().clone();
                 let schema = schema.replace_qualifier(&alias);
                 SQLRelation::SubqueryAlias(SQLSubqueryAlias {

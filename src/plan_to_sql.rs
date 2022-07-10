@@ -61,7 +61,14 @@ pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
                 .join(" AND ");
             Ok(format!(
                 "\n{}{}\n{}{} JOIN\n{}{}\n{}ON {}",
-                indent_str, l, indent_str, join_type, indent_str, r, indent_str, join_condition
+                indent_str,
+                l,
+                indent_str,
+                join_type.to_string().to_uppercase(),
+                indent_str,
+                r,
+                indent_str,
+                join_condition
             ))
         }
         SQLRelation::SubqueryAlias(SQLSubqueryAlias { input, alias, .. }) => {
@@ -74,6 +81,7 @@ pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
 /// Generate a SQL string from an expression
 fn expr_to_sql(expr: &SQLExpr, indent: usize) -> Result<String> {
     Ok(match expr {
+        SQLExpr::Alias { expr, alias } => format!("{} AS {}", expr_to_sql(expr, indent)?, alias),
         SQLExpr::Column(col) => col.flat_name(),
         SQLExpr::BinaryExpr { left, op, right } => {
             let l = expr_to_sql(left, indent)?;
