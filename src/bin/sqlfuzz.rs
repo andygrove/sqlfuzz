@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::logical_plan::JoinType;
+use datafusion::parquet::arrow::ArrowWriter;
+use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::{
     common::{DataFusionError, Result},
     dataframe::DataFrame,
@@ -20,8 +23,9 @@ use datafusion::{
         AvroReadOptions, CsvReadOptions, NdJsonReadOptions, ParquetReadOptions, SessionContext,
     },
 };
-use sqlfuzz::{plan_to_sql, FuzzConfig, SQLRelationGenerator, SQLTable};
+use sqlfuzz::{generate_batch, plan_to_sql, FuzzConfig, SQLRelationGenerator, SQLTable};
 use std::{
+    fs::File,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -29,7 +33,23 @@ use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "sqlfuzz", about = "sqlfuzz SQL query generator")]
-struct Config {
+enum Config {
+    Query(QueryGen),
+    Data(DataGen),
+}
+
+#[derive(Debug, StructOpt)]
+struct DataGen {
+    #[structopt(short, long, required = true)]
+    num_files: usize,
+    #[structopt(short, long, required = true)]
+    path: PathBuf,
+    #[structopt(short, long, default_value = "20")]
+    row_count: usize,
+}
+
+#[derive(Debug, StructOpt)]
+struct QueryGen {
     #[structopt(parse(from_os_str), long, required = true, multiple = true)]
     table: Vec<PathBuf>,
     #[structopt(short, long, required = false, multiple = true)]
@@ -44,13 +64,45 @@ struct Config {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let config = Config::from_args();
+    match Config::from_args() {
+        Config::Query(config) => query_gen(&config).await,
+        Config::Data(config) => data_gen(&config).await,
+    }
+}
+
+async fn data_gen(config: &DataGen) -> Result<()> {
+    //TODO randomize the schema and support more types
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("c0", DataType::Int32, true),
+        Field::new("c1", DataType::Int32, true),
+        Field::new("c2", DataType::Int32, true),
+        Field::new("c3", DataType::Utf8, true),
+    ]));
+
+    let mut rng = rand::thread_rng();
+    let writer_properties = WriterProperties::builder().build();
+
+    for i in 0..config.num_files {
+        let batch = generate_batch(&mut rng, &schema, config.row_count)?;
+        let filename = format!("test{}.parquet", i);
+        let path = config.path.join(&filename);
+        println!("Generating {:?}", path);
+        let file = File::create(path)?;
+        let mut writer =
+            ArrowWriter::try_new(file, schema.clone(), Some(writer_properties.clone()))?;
+        writer.write(&batch)?;
+        writer.close()?;
+    }
+    Ok(())
+}
+
+async fn query_gen(config: &QueryGen) -> Result<()> {
     if config.table.is_empty() {
         panic!("must provide tables to generate queries for");
     }
 
     let mut join_types = vec![];
-    for jt in config.join_type {
+    for jt in &config.join_type {
         let jt = match jt.as_str() {
             "anti" => JoinType::Anti,
             "semi" => JoinType::Semi,

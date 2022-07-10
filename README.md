@@ -2,17 +2,23 @@
 
 Generate random (and sometimes valid!) SQL queries from any local datasets in Parquet, CSV, JSON, or Avro format.
 
-## Command-line Usage
+## Installation
 
 ```bash
-cargo run -- \
-  --table ./testdata/test.csv \
+cargo install sqlfuzz
+```
+
+## Query Fuzzing
+
+```bash
+sqlfuzz query \
+  --table ./testdata/test0.parquet ./testdata/test1.parquet \
   --join-type inner left right full semi anti \
   --count 5 \
   --max-depth 5
 ```
 
-## Example Generated Query
+### Example Generated Query
 
 ```sql
 SELECT table_alias_29.a, table_alias_29.b, table_alias_29.c
@@ -28,4 +34,12 @@ FROM
            FROM (SELECT test.a, test.b, test.c
                  FROM test) table_alias_30) table_alias_31) table_alias_32
     ON table_alias_29.b = table_alias_32.a;
+```
+
+## Data Generator
+
+If you don't already have suitable data, you can generate random data files to run the query fuzzer against.
+
+```bash
+sqlfuzz data --path ./testdata --num-files 4 --row-count 20
 ```

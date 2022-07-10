@@ -345,7 +345,7 @@ impl<'a> SQLRelationGenerator<'a> {
     fn generate_alias(&mut self) -> String {
         let id = self.id_gen;
         self.id_gen += 1;
-        format!("table_alias_{}", id)
+        format!("t{}", id)
     }
 
     pub fn select_star(&mut self, plan: &SQLRelation) -> SQLRelation {
@@ -458,7 +458,7 @@ impl TableProvider for FakeTableProvider {
 
 #[cfg(test)]
 mod test {
-    use crate::generator::FuzzConfig;
+    use crate::fuzz_sql::FuzzConfig;
     use crate::{SQLRelationGenerator, SQLTable};
     use datafusion::{
         arrow::datatypes::DataType,
