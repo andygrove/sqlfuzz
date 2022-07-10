@@ -66,6 +66,7 @@ pub enum SQLExpr {
 }
 
 impl SQLExpr {
+    /// Convert SQLExpr to DataFusion logical expression
     pub fn to_expr(&self) -> Result<Expr> {
         match self {
             Self::Alias { expr, alias } => {
@@ -74,7 +75,7 @@ impl SQLExpr {
             Self::Column(col) => Ok(Expr::Column(col.clone())),
             Self::BinaryExpr { left, op, right } => Ok(Expr::BinaryExpr {
                 left: Box::new(left.to_expr()?),
-                op: op.clone(),
+                op: *op,
                 right: Box::new(right.to_expr()?),
             }),
             Self::Exists { subquery, negated } => {
@@ -154,7 +155,7 @@ impl SQLRelation {
 
                 let projection = LogicalPlan::Projection(Projection {
                     expr,
-                    input: input,
+                    input,
                     schema,
                     alias: None,
                 });
@@ -224,14 +225,13 @@ pub struct SQLRelationGenerator<'a> {
     semi_join: bool,
     anti_join: bool,
     column_alias_prefix: String,
-    table_alias_prefix: String,
 }
 
 impl<'a> SQLRelationGenerator<'a> {
     pub fn new(rng: &'a mut ThreadRng, tables: Vec<SQLTable>, config: FuzzConfig) -> Self {
         let semi_join = config.join_types.contains(&JoinType::Semi);
         let anti_join = config.join_types.contains(&JoinType::Anti);
-        let mut config = config.clone();
+        let mut config = config;
         config.join_types = config
             .join_types
             .iter()
@@ -246,14 +246,12 @@ impl<'a> SQLRelationGenerator<'a> {
             config,
             semi_join,
             anti_join,
-            column_alias_prefix: "__c".to_string(),
-            table_alias_prefix: "__t".to_string(),
+            column_alias_prefix: "_c".to_string(),
         }
     }
 
     pub fn generate_select(&mut self) -> Result<SQLRelation> {
         let input = self.generate_relation()?;
-        let input = self.alias(&input);
         let columns: Vec<Column> = input
             .to_logical_plan()?
             .schema()
@@ -282,7 +280,7 @@ impl<'a> SQLRelationGenerator<'a> {
 
     /// Generate uncorrelated subquery in the form `EXISTS (SELECT semi_join_field FROM
     /// semi_join_table)`
-    fn generate_exists(&mut self, negated: bool, outer_columns: &Vec<Column>) -> Result<SQLExpr> {
+    fn generate_exists(&mut self, negated: bool, outer_columns: &[Column]) -> Result<SQLExpr> {
         let semi_join_table = self.generate_select()?;
         let x = semi_join_table.schema();
         let semi_join_field = x.field(0);
@@ -353,12 +351,6 @@ impl<'a> SQLRelationGenerator<'a> {
         }
     }
 
-    fn generate_table_alias(&mut self) -> String {
-        let id = self.id_gen;
-        self.id_gen += 1;
-        format!("{}{}", &self.table_alias_prefix, id)
-    }
-
     fn generate_column_alias(&mut self) -> String {
         let id = self.id_gen;
         self.id_gen += 1;
@@ -381,27 +373,9 @@ impl<'a> SQLRelationGenerator<'a> {
         })
     }
 
-    fn alias(&mut self, plan: &SQLRelation) -> SQLRelation {
-        match plan {
-            SQLRelation::SubqueryAlias { .. } => plan.clone(),
-            _ => {
-                let alias = self.generate_table_alias();
-                let schema = plan.schema().as_ref().clone();
-                let schema = schema.replace_qualifier(&alias);
-                SQLRelation::SubqueryAlias(SQLSubqueryAlias {
-                    input: Box::new(plan.clone()),
-                    alias,
-                    schema: Arc::new(schema),
-                })
-            }
-        }
-    }
-
     fn generate_join(&mut self) -> Result<SQLRelation> {
         let t1 = self.generate_relation()?;
-        let t1 = self.alias(&t1);
         let t2 = self.generate_relation()?;
-        let t2 = self.alias(&t2);
         let schema = t1.schema().as_ref().clone();
         schema.join(&t2.schema())?;
 
@@ -421,7 +395,7 @@ impl<'a> SQLRelationGenerator<'a> {
             right: Box::new(t2),
             on,
             filter: None,
-            join_type: join_type.clone(),
+            join_type: *join_type,
             join_constraint: JoinConstraint::On,
             schema: Arc::new(schema),
         }))
@@ -440,8 +414,7 @@ impl<'a> SQLRelationGenerator<'a> {
             filters: vec![],
             fetch: None,
         });
-        let projection = self.select_star(&table_scan);
-        Ok(self.alias(&projection))
+        Ok(self.select_star(&table_scan))
     }
 
     fn random_table(&mut self) -> &SQLTable {

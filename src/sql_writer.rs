@@ -60,7 +60,7 @@ pub fn plan_to_sql(plan: &SQLRelation, indent: usize) -> Result<String> {
                 .collect::<Vec<_>>()
                 .join(" AND ");
             Ok(format!(
-                "\n{}{}\n{}{} JOIN\n{}{}\n{}ON {}",
+                "\n{}({})\n{}{} JOIN\n{}({})\n{}ON {}",
                 indent_str,
                 l,
                 indent_str,

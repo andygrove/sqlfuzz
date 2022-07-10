@@ -21,19 +21,16 @@ sqlfuzz query \
 ### Example Generated Query
 
 ```sql
-SELECT table_alias_29.a, table_alias_29.b, table_alias_29.c
-FROM
-    (SELECT table_alias_28.a, table_alias_28.b, table_alias_28.c
-     FROM (SELECT table_alias_27.a, table_alias_27.b, table_alias_27.c
-           FROM (SELECT test.a, test.b, test.c
-                 FROM test) table_alias_27
-           WHERE table_alias_27.a <= table_alias_27.a) table_alias_28) table_alias_29
-        Full JOIN
-    (SELECT table_alias_31.a, table_alias_31.b, table_alias_31.c
-     FROM (SELECT table_alias_30.a, table_alias_30.b, table_alias_30.c
-           FROM (SELECT test.a, test.b, test.c
-                 FROM test) table_alias_30) table_alias_31) table_alias_32
-    ON table_alias_29.b = table_alias_32.a;
+SELECT __c320, __c321, __c322, __c323
+FROM (
+    (SELECT test1.c0 AS __c320, test1.c1 AS __c321, test1.c2 AS __c322, test1.c3 AS __c323
+    FROM (test1))
+    INNER JOIN
+    (SELECT test1.c0 AS __c324, test1.c1 AS __c325, test1.c2 AS __c326, test1.c3 AS __c327
+    FROM (test1))
+    ON __c320 = __c327)
+WHERE __c323 > __c320;
+
 ```
 
 ## Data Generator

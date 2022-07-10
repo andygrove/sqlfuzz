@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 /// Generate an Arrow RecordBatch for the provided schema and row count
 pub fn generate_batch(
-    mut rng: &mut ThreadRng,
+    rng: &mut ThreadRng,
     schema: &Schema,
     row_count: usize,
 ) -> Result<RecordBatch> {
@@ -37,7 +37,7 @@ pub fn generate_batch(
         .collect::<Result<Vec<_>>>()?;
     let arrays = gen
         .iter()
-        .map(|g| g.generate(&mut rng, row_count))
+        .map(|g| g.generate(rng, row_count))
         .collect::<Result<Vec<_>>>()?;
     RecordBatch::try_new(Arc::new(schema.clone()), arrays)
 }

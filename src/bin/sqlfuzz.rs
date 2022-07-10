@@ -159,12 +159,12 @@ async fn query_gen(config: &QueryGen) -> Result<()> {
         match ctx.create_logical_plan(&sql) {
             Ok(_plan) => {
                 generated += 1;
-                println!("SQL Query #{}:\n\n{};\n\n", generated, sql);
+                println!("-- SQL Query #{}:\n\n{};\n\n", generated, sql);
                 // println!("Plan:\n\n{:?}", plan)
             }
             Err(e) if config.verbose => {
-                println!("SQL:\n\n{};\n\n", sql);
-                println!("SQL was not valid: {:?}", e)
+                println!("-- SQL:\n\n{};\n\n", sql);
+                println!("-- SQL was not valid: {:?}\n\n", e)
             }
             _ => {
                 // ignore
