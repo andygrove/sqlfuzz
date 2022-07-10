@@ -1,6 +1,8 @@
 # SQL Fuzz Testing Utilities
 
-Generate random (and sometimes valid!) SQL queries from any local datasets in Parquet, CSV, JSON, or Avro format.
+`sqlfuzz` is a command-line tool and library for generating random data files and SQL queries.
+
+For background information on SQL fuzzing, I recommend reading the [SparkFuzz](https://ir.cwi.nl/pub/30222/3395032.3395327.pdf) paper.
 
 ## Installation
 
@@ -8,7 +10,9 @@ Generate random (and sometimes valid!) SQL queries from any local datasets in Pa
 cargo install sqlfuzz
 ```
 
-## Query Fuzzing
+## SQL Query Fuzzing
+
+Use the following syntax to generate randomized SQL queries against the example data files in this repository.
 
 ```bash
 sqlfuzz query \
@@ -35,7 +39,7 @@ WHERE __c323 > __c320;
 
 ## Data Generator
 
-If you don't already have suitable data, you can generate random data files to run the query fuzzer against.
+`sqlfuzz` can generate random data files to run the query fuzzer against. The files are generated in Parquet format.
 
 ```bash
 sqlfuzz data --path ./testdata --num-files 4 --row-count 20
