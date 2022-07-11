@@ -71,7 +71,7 @@ object Main {
           val rows = spark.sql(sql).collect()
           w.write("-- BEGIN RESULT --\n")
           for (row <- rows) {
-            w.write(row.toSeq.map(_.toString).mkString("\t"))
+            w.write(row.toSeq.map(x => Option(x).map(_.toString).orNull).mkString("\t"))
             w.write('\n')
           }
           w.write("-- END RESULT --\n")

@@ -121,7 +121,7 @@ async fn execute(config: &ExecuteConfig) -> Result<()> {
                                             let col =
                                                 col.as_any().downcast_ref::<Int8Array>().unwrap();
                                             if col.is_null(i) {
-                                                csv.push_str("NULL");
+                                                csv.push_str("null");
                                             } else {
                                                 csv.push_str(&format!("{}", col.value(i)))
                                             }
@@ -130,7 +130,7 @@ async fn execute(config: &ExecuteConfig) -> Result<()> {
                                             let col =
                                                 col.as_any().downcast_ref::<Int32Array>().unwrap();
                                             if col.is_null(i) {
-                                                csv.push_str("NULL");
+                                                csv.push_str("null");
                                             } else {
                                                 csv.push_str(&format!("{}", col.value(i)))
                                             }
@@ -139,7 +139,7 @@ async fn execute(config: &ExecuteConfig) -> Result<()> {
                                             let col =
                                                 col.as_any().downcast_ref::<StringArray>().unwrap();
                                             if col.is_null(i) {
-                                                csv.push_str("NULL");
+                                                csv.push_str("null");
                                             } else {
                                                 csv.push_str(&format!("{}", col.value(i)))
                                             }
