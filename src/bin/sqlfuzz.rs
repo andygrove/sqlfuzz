@@ -42,6 +42,8 @@ enum Config {
     Data(DataGen),
     /// Run SQL queries and capture results
     Execute(ExecuteConfig),
+    /// Compare two test runs
+    Compare(CompareConfig),
 }
 
 #[derive(Debug, StructOpt)]
@@ -78,13 +80,77 @@ struct ExecuteConfig {
     verbose: bool,
 }
 
+#[derive(Debug, StructOpt)]
+struct CompareConfig {
+    #[structopt(required = true)]
+    report1: PathBuf,
+    #[structopt(required = true)]
+    report2: PathBuf,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     match Config::from_args() {
         Config::Query(config) => query_gen(&config).await,
         Config::Data(config) => data_gen(&config).await,
         Config::Execute(config) => execute(&config).await,
+        Config::Compare(config) => compare(&config).await,
     }
+}
+
+async fn compare(config: &CompareConfig) -> Result<()> {
+    let report1 = read_report(&config.report1)?;
+    let report2 = read_report(&config.report2)?;
+    assert_eq!(report1.results.len(), report2.results.len());
+    for i in 0..report1.results.len() {
+        let mut result1 = report1.results[i].rows.clone();
+        result1.sort();
+        let mut result2 = report2.results[i].rows.clone();
+        result2.sort();
+        println!("COMPARE");
+        println!("{:?}", result1);
+        println!("WITH");
+        println!("{:?}", result2);
+        if result1 == result2 {
+            println!("VERDICT: SAME");
+        } else {
+            println!("VERDICT: DIFFERENT");
+        }
+        println!("-------------------------");
+    }
+    Ok(())
+}
+
+struct ResultSet {
+    rows: Vec<Vec<String>>,
+}
+
+struct Report {
+    results: Vec<ResultSet>,
+}
+
+fn read_report(filename: &PathBuf) -> Result<Report> {
+    let file = File::open(filename)?;
+    let reader = BufReader::new(file);
+    let lines = reader.lines();
+    let mut report = Report { results: vec![] };
+    let mut rows = vec![];
+    let mut in_result = true;
+    for line in lines {
+        let line = line?;
+        if line.starts_with("-- BEGIN RESULT --") {
+            in_result = true;
+        } else if line.starts_with("-- END RESULT --") {
+            in_result = false;
+            report.results.push(ResultSet { rows });
+            rows = vec![];
+        } else {
+            if in_result {
+                rows.push(line.split('\t').map(|s| s.to_string()).collect());
+            }
+        }
+    }
+    Ok(report)
 }
 
 async fn execute(config: &ExecuteConfig) -> Result<()> {

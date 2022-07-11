@@ -63,3 +63,9 @@ sqlfuzz execute \
   --table ./testdata/test0.parquet ./testdata/test1.parquet \
   --sql testdata/example.sql
 ```
+
+## Comparing Results
+
+```bash
+sqlfuzz compare report1.txt report2.txt
+```
