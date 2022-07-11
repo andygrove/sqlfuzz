@@ -53,5 +53,19 @@ WHERE __c323 > __c320;
 `sqlfuzz` can generate random data files to run the query fuzzer against. The files are generated in Parquet format.
 
 ```bash
-sqlfuzz data --path ./testdata --num-files 4 --row-count 20
+sqlfuzz data --path ./testdata --num-files 4 --row-count 256
+```
+
+## Executing Queries
+
+```bash
+sqlfuzz execute \
+  --table ./testdata/test0.parquet ./testdata/test1.parquet \
+  --sql testdata/example.sql
+```
+
+## Comparing Results
+
+```bash
+sqlfuzz compare report1.txt report2.txt
 ```

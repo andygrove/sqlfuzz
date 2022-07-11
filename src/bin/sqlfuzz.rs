@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use datafusion::arrow::array::{Array, Int32Array, Int8Array, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::logical_plan::JoinType;
 use datafusion::parquet::arrow::ArrowWriter;
@@ -24,6 +25,7 @@ use datafusion::{
     },
 };
 use sqlfuzz::{generate_batch, plan_to_sql, FuzzConfig, SQLRelationGenerator, SQLTable};
+use std::io::{BufRead, BufReader};
 use std::{
     fs::File,
     path::{Path, PathBuf},
@@ -34,8 +36,14 @@ use structopt::StructOpt;
 #[derive(Debug, StructOpt)]
 #[structopt(name = "sqlfuzz", about = "sqlfuzz SQL query generator")]
 enum Config {
+    /// Generate random queries
     Query(QueryGen),
+    /// Generate random data files
     Data(DataGen),
+    /// Run SQL queries and capture results
+    Execute(ExecuteConfig),
+    /// Compare two test runs
+    Compare(CompareConfig),
 }
 
 #[derive(Debug, StructOpt)]
@@ -62,21 +70,176 @@ struct QueryGen {
     verbose: bool,
 }
 
+#[derive(Debug, StructOpt)]
+struct ExecuteConfig {
+    #[structopt(parse(from_os_str), long, required = true, multiple = true)]
+    table: Vec<PathBuf>,
+    #[structopt(short, long, required = true)]
+    sql: PathBuf,
+    #[structopt(short, long)]
+    verbose: bool,
+}
+
+#[derive(Debug, StructOpt)]
+struct CompareConfig {
+    #[structopt(required = true)]
+    report1: PathBuf,
+    #[structopt(required = true)]
+    report2: PathBuf,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     match Config::from_args() {
         Config::Query(config) => query_gen(&config).await,
         Config::Data(config) => data_gen(&config).await,
+        Config::Execute(config) => execute(&config).await,
+        Config::Compare(config) => compare(&config).await,
     }
+}
+
+async fn compare(config: &CompareConfig) -> Result<()> {
+    let report1 = read_report(&config.report1)?;
+    let report2 = read_report(&config.report2)?;
+    assert_eq!(report1.results.len(), report2.results.len());
+    for i in 0..report1.results.len() {
+        let mut result1 = report1.results[i].rows.clone();
+        result1.sort();
+        let mut result2 = report2.results[i].rows.clone();
+        result2.sort();
+        println!("COMPARE");
+        println!("{:?}", result1);
+        println!("WITH");
+        println!("{:?}", result2);
+        if result1 == result2 {
+            println!("VERDICT: SAME");
+        } else {
+            println!("VERDICT: DIFFERENT");
+        }
+        println!("-------------------------");
+    }
+    Ok(())
+}
+
+struct ResultSet {
+    rows: Vec<Vec<String>>,
+}
+
+struct Report {
+    results: Vec<ResultSet>,
+}
+
+fn read_report(filename: &PathBuf) -> Result<Report> {
+    let file = File::open(filename)?;
+    let reader = BufReader::new(file);
+    let lines = reader.lines();
+    let mut report = Report { results: vec![] };
+    let mut rows = vec![];
+    let mut in_result = true;
+    for line in lines {
+        let line = line?;
+        if line.starts_with("-- BEGIN RESULT --") {
+            in_result = true;
+        } else if line.starts_with("-- END RESULT --") {
+            in_result = false;
+            report.results.push(ResultSet { rows });
+            rows = vec![];
+        } else {
+            if in_result {
+                rows.push(line.split('\t').map(|s| s.to_string()).collect());
+            }
+        }
+    }
+    Ok(report)
+}
+
+async fn execute(config: &ExecuteConfig) -> Result<()> {
+    // register tables with context
+    let (ctx, _) = create_datafusion_context(&config.table, config.verbose).await?;
+
+    let file = File::open(&config.sql)?;
+    let reader = BufReader::new(file);
+    let lines = reader.lines();
+    let mut sql = String::new();
+    for line in lines {
+        let line = line?;
+        if line.starts_with("--") {
+            println!("{}", line);
+        } else {
+            sql.push_str(&line);
+            sql.push('\n');
+            if sql.trim().ends_with(';') {
+                println!("{}", sql);
+                match ctx.sql(&sql).await {
+                    Ok(df) => {
+                        println!("-- BEGIN RESULT --");
+                        let batches = df.collect().await?;
+                        for batch in &batches {
+                            for i in 0..batch.num_rows() {
+                                let mut csv = String::new();
+                                for j in 0..batch.num_columns() {
+                                    if j > 0 {
+                                        csv.push('\t');
+                                    }
+                                    let col = batch.column(j);
+                                    match col.data_type() {
+                                        DataType::Int8 => {
+                                            let col =
+                                                col.as_any().downcast_ref::<Int8Array>().unwrap();
+                                            if col.is_null(i) {
+                                                csv.push_str("null");
+                                            } else {
+                                                csv.push_str(&format!("{}", col.value(i)))
+                                            }
+                                        }
+                                        DataType::Int32 => {
+                                            let col =
+                                                col.as_any().downcast_ref::<Int32Array>().unwrap();
+                                            if col.is_null(i) {
+                                                csv.push_str("null");
+                                            } else {
+                                                csv.push_str(&format!("{}", col.value(i)))
+                                            }
+                                        }
+                                        DataType::Utf8 => {
+                                            let col =
+                                                col.as_any().downcast_ref::<StringArray>().unwrap();
+                                            if col.is_null(i) {
+                                                csv.push_str("null");
+                                            } else {
+                                                csv.push_str(&format!("{}", col.value(i)))
+                                            }
+                                        }
+                                        _ => unimplemented!(),
+                                    }
+                                }
+                                println!("{}", csv);
+                            }
+                        }
+                        println!("-- END RESULT --");
+                    }
+                    Err(e) => {
+                        println!("-- BEGIN ERROR --");
+                        println!("{:?}", e);
+                        println!("-- END ERROR --");
+                    }
+                }
+                sql = String::new();
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn data_gen(config: &DataGen) -> Result<()> {
     //TODO randomize the schema and support more types
     let schema = Arc::new(Schema::new(vec![
-        Field::new("c0", DataType::Int32, true),
-        Field::new("c1", DataType::Int32, true),
+        Field::new("c0", DataType::Int8, true),
+        Field::new("c1", DataType::Int8, true),
         Field::new("c2", DataType::Int32, true),
-        Field::new("c3", DataType::Utf8, true),
+        Field::new("c3", DataType::Int32, true),
+        Field::new("c4", DataType::Utf8, true),
+        Field::new("c5", DataType::Utf8, true),
     ]));
 
     let mut rng = rand::thread_rng();
@@ -116,22 +279,7 @@ async fn query_gen(config: &QueryGen) -> Result<()> {
     }
 
     // register tables with context
-    let ctx = SessionContext::new();
-    let mut sql_tables: Vec<SQLTable> = vec![];
-    for path in &config.table {
-        let table_name = path
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .ok_or_else(|| DataFusionError::Internal("Invalid filename".to_string()))?;
-        let table_name = sanitize_table_name(table_name);
-        let filename = parse_filename(path)?;
-        if config.verbose {
-            println!("Registering table '{}' for {}", table_name, path.display());
-        }
-        let df = register_table(&ctx, &table_name, filename).await?;
-        sql_tables.push(SQLTable::new(&table_name, df.schema().clone()));
-    }
+    let (ctx, sql_tables) = create_datafusion_context(&config.table, config.verbose).await?;
 
     // generate a random SQL query
     let num_queries = config.count;
@@ -173,6 +321,29 @@ async fn query_gen(config: &QueryGen) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn create_datafusion_context(
+    table: &[PathBuf],
+    verbose: bool,
+) -> Result<(SessionContext, Vec<SQLTable>)> {
+    let ctx = SessionContext::new();
+    let mut sql_tables: Vec<SQLTable> = vec![];
+    for path in table {
+        let table_name = path
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .ok_or_else(|| DataFusionError::Internal("Invalid filename".to_string()))?;
+        let table_name = sanitize_table_name(table_name);
+        let filename = parse_filename(path)?;
+        if verbose {
+            println!("Registering table '{}' for {}", table_name, path.display());
+        }
+        let df = register_table(&ctx, &table_name, filename).await?;
+        sql_tables.push(SQLTable::new(&table_name, df.schema().clone()));
+    }
+    Ok((ctx, sql_tables))
 }
 
 fn parse_filename(filename: &Path) -> Result<&str> {

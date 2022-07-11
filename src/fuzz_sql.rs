@@ -283,12 +283,12 @@ impl<'a> SQLRelationGenerator<'a> {
     fn generate_exists(&mut self, negated: bool, outer_columns: &[Column]) -> Result<SQLExpr> {
         let semi_join_table = self.generate_select()?;
         let x = semi_join_table.schema();
-        let semi_join_field = x.field(0);
+        let semi_join_field = x.field(self.rng.gen_range(0..x.fields().len()));
 
-        // TODO randomize the selection
         let semi_join_schema = semi_join_table.schema();
-        let inner_field = semi_join_schema.field(0);
-        let outer_field = &outer_columns[0];
+        let inner_field =
+            semi_join_schema.field(self.rng.gen_range(0..semi_join_schema.fields().len()));
+        let outer_field = &outer_columns[self.rng.gen_range(0..outer_columns.len())];
 
         let filter = SQLExpr::BinaryExpr {
             left: Box::new(SQLExpr::Column(Column::from_qualified_name(
@@ -453,6 +453,7 @@ impl TableProvider for FakeTableProvider {
 mod test {
     use crate::fuzz_sql::FuzzConfig;
     use crate::{SQLRelationGenerator, SQLTable};
+    use datafusion::prelude::JoinType;
     use datafusion::{
         arrow::datatypes::DataType,
         common::{DFField, DFSchema, Result},
@@ -463,10 +464,8 @@ mod test {
     fn test() -> Result<()> {
         let mut rng = rand::thread_rng();
         let config = FuzzConfig {
-            join_types: vec![],
+            join_types: vec![JoinType::Semi],
             max_depth: 5,
-            semi_joins: false,
-            anti_joins: false,
         };
         let mut gen = SQLRelationGenerator::new(&mut rng, test_tables()?, config);
         let _plan = gen.generate_relation()?;
@@ -478,8 +477,9 @@ mod test {
             "foo",
             DFSchema::new_with_metadata(
                 vec![
-                    DFField::new(None, "a", DataType::Int32, true),
-                    DFField::new(None, "b", DataType::Utf8, true),
+                    DFField::new(None, "a", DataType::Int8, true),
+                    DFField::new(None, "b", DataType::Int32, true),
+                    DFField::new(None, "c", DataType::Utf8, true),
                 ],
                 HashMap::new(),
             )?,
