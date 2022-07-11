@@ -29,13 +29,19 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use std::io::{BufRead, BufReader};
+use datafusion::arrow::array::{Array, Int32Array, StringArray};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "sqlfuzz", about = "sqlfuzz SQL query generator")]
 enum Config {
+    /// Generate random queries
     Query(QueryGen),
+    /// Generate random data files
     Data(DataGen),
+    /// Run SQL queries and capture results
+    Execute(ExecuteConfig),
 }
 
 #[derive(Debug, StructOpt)]
@@ -62,12 +68,72 @@ struct QueryGen {
     verbose: bool,
 }
 
+#[derive(Debug, StructOpt)]
+struct ExecuteConfig {
+    #[structopt(parse(from_os_str), long, required = true, multiple = true)]
+    table: Vec<PathBuf>,
+    #[structopt(short, long, required = true)]
+    sql: PathBuf,
+    #[structopt(short, long)]
+    verbose: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     match Config::from_args() {
         Config::Query(config) => query_gen(&config).await,
         Config::Data(config) => data_gen(&config).await,
+        Config::Execute(config) => execute(&config).await,
     }
+}
+
+async fn execute(config: &ExecuteConfig) -> Result<()> {
+    // register tables with context
+    let (ctx, _) = create_datafusion_context(&config.table, config.verbose).await?;
+
+    let file = File::open(&config.sql)?;
+    let reader = BufReader::new(file);
+    let lines = reader.lines();
+    let mut sql= String::new();
+    for line in lines {
+        let line = line?;
+        if !line.starts_with("--") {
+            sql.push_str(&line);
+            sql.push('\n');
+            if sql.trim().ends_with(';') {
+                println!("{}", sql);
+                let df = ctx.sql(&sql).await?;
+                let batches = df.collect().await?;
+                for batch in &batches {
+                    for i in 0..batch.num_rows() {
+                        let mut csv = String::new();
+                        for j in 0..batch.num_columns() {
+                            if j > 0 {
+                                csv.push(',');
+                            }
+                            let col = batch.column(j);
+                            match col.data_type() {
+                                DataType::Int32 => {
+                                    let col = col.as_any().downcast_ref::<Int32Array>().unwrap();
+                                    // TODO handle nulls
+                                    csv.push_str(&format!("{}", col.value(i)))
+                                }
+                                DataType::Utf8 => {
+                                    let col = col.as_any().downcast_ref::<StringArray>().unwrap();
+                                    // TODO handle nulls
+                                    csv.push_str(&format!("{}", col.value(i)))
+                                }
+                                _ => unimplemented!()
+                            }
+                        }
+                        println!("{}", csv);
+                    }
+                }
+                sql = String::new();
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn data_gen(config: &DataGen) -> Result<()> {
@@ -116,22 +182,7 @@ async fn query_gen(config: &QueryGen) -> Result<()> {
     }
 
     // register tables with context
-    let ctx = SessionContext::new();
-    let mut sql_tables: Vec<SQLTable> = vec![];
-    for path in &config.table {
-        let table_name = path
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .ok_or_else(|| DataFusionError::Internal("Invalid filename".to_string()))?;
-        let table_name = sanitize_table_name(table_name);
-        let filename = parse_filename(path)?;
-        if config.verbose {
-            println!("Registering table '{}' for {}", table_name, path.display());
-        }
-        let df = register_table(&ctx, &table_name, filename).await?;
-        sql_tables.push(SQLTable::new(&table_name, df.schema().clone()));
-    }
+    let (ctx, sql_tables) = create_datafusion_context(&config.table, config.verbose).await?;
 
     // generate a random SQL query
     let num_queries = config.count;
@@ -173,6 +224,26 @@ async fn query_gen(config: &QueryGen) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn create_datafusion_context(table: &[PathBuf], verbose: bool) -> Result<(SessionContext, Vec<SQLTable>)> {
+    let ctx = SessionContext::new();
+    let mut sql_tables: Vec<SQLTable> = vec![];
+    for path in table {
+        let table_name = path
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .ok_or_else(|| DataFusionError::Internal("Invalid filename".to_string()))?;
+        let table_name = sanitize_table_name(table_name);
+        let filename = parse_filename(path)?;
+        if verbose {
+            println!("Registering table '{}' for {}", table_name, path.display());
+        }
+        let df = register_table(&ctx, &table_name, filename).await?;
+        sql_tables.push(SQLTable::new(&table_name, df.schema().clone()));
+    }
+    Ok((ctx, sql_tables))
 }
 
 fn parse_filename(filename: &Path) -> Result<&str> {

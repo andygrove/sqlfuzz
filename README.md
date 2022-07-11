@@ -55,3 +55,11 @@ WHERE __c323 > __c320;
 ```bash
 sqlfuzz data --path ./testdata --num-files 4 --row-count 20
 ```
+
+## Executing Queries
+
+```bash
+sqlfuzz execute \
+  --table ./testdata/test0.parquet ./testdata/test1.parquet \
+  --sql testdata/example.sql
+```
