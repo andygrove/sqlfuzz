@@ -59,21 +59,22 @@ object Main {
     var sql = "";
 
     for (line <- lines) {
-      if (!line.startsWith("--")) {
+      if (line.startsWith("--")) {
+        w.write(line)
+        w.write('\n')
+      } else {
         sql += line.trim()
         sql += "\n";
         if (sql.trim().endsWith(";")) {
-
           w.write(sql)
           w.write('\n')
-
           val rows = spark.sql(sql).collect()
-
+          w.write("-- BEGIN RESULT --\n")
           for (row <- rows) {
-            w.write(row.toSeq.map(_.toString).mkString(","))
+            w.write(row.toSeq.map(_.toString).mkString("\t"))
             w.write('\n')
           }
-
+          w.write("-- END RESULT --\n")
           sql = ""
         }
       }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use datafusion::arrow::array::{Array, Int32Array, Int8Array, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::logical_plan::JoinType;
 use datafusion::parquet::arrow::ArrowWriter;
@@ -24,13 +25,12 @@ use datafusion::{
     },
 };
 use sqlfuzz::{generate_batch, plan_to_sql, FuzzConfig, SQLRelationGenerator, SQLTable};
+use std::io::{BufRead, BufReader};
 use std::{
     fs::File,
     path::{Path, PathBuf},
     sync::Arc,
 };
-use std::io::{BufRead, BufReader};
-use datafusion::arrow::array::{Array, Int32Array, StringArray};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -94,39 +94,68 @@ async fn execute(config: &ExecuteConfig) -> Result<()> {
     let file = File::open(&config.sql)?;
     let reader = BufReader::new(file);
     let lines = reader.lines();
-    let mut sql= String::new();
+    let mut sql = String::new();
     for line in lines {
         let line = line?;
-        if !line.starts_with("--") {
+        if line.starts_with("--") {
+            println!("{}", line);
+        } else {
             sql.push_str(&line);
             sql.push('\n');
             if sql.trim().ends_with(';') {
                 println!("{}", sql);
-                let df = ctx.sql(&sql).await?;
-                let batches = df.collect().await?;
-                for batch in &batches {
-                    for i in 0..batch.num_rows() {
-                        let mut csv = String::new();
-                        for j in 0..batch.num_columns() {
-                            if j > 0 {
-                                csv.push(',');
-                            }
-                            let col = batch.column(j);
-                            match col.data_type() {
-                                DataType::Int32 => {
-                                    let col = col.as_any().downcast_ref::<Int32Array>().unwrap();
-                                    // TODO handle nulls
-                                    csv.push_str(&format!("{}", col.value(i)))
+                match ctx.sql(&sql).await {
+                    Ok(df) => {
+                        println!("-- BEGIN RESULT --");
+                        let batches = df.collect().await?;
+                        for batch in &batches {
+                            for i in 0..batch.num_rows() {
+                                let mut csv = String::new();
+                                for j in 0..batch.num_columns() {
+                                    if j > 0 {
+                                        csv.push('\t');
+                                    }
+                                    let col = batch.column(j);
+                                    match col.data_type() {
+                                        DataType::Int8 => {
+                                            let col =
+                                                col.as_any().downcast_ref::<Int8Array>().unwrap();
+                                            if col.is_null(i) {
+                                                csv.push_str("NULL");
+                                            } else {
+                                                csv.push_str(&format!("{}", col.value(i)))
+                                            }
+                                        }
+                                        DataType::Int32 => {
+                                            let col =
+                                                col.as_any().downcast_ref::<Int32Array>().unwrap();
+                                            if col.is_null(i) {
+                                                csv.push_str("NULL");
+                                            } else {
+                                                csv.push_str(&format!("{}", col.value(i)))
+                                            }
+                                        }
+                                        DataType::Utf8 => {
+                                            let col =
+                                                col.as_any().downcast_ref::<StringArray>().unwrap();
+                                            if col.is_null(i) {
+                                                csv.push_str("NULL");
+                                            } else {
+                                                csv.push_str(&format!("{}", col.value(i)))
+                                            }
+                                        }
+                                        _ => unimplemented!(),
+                                    }
                                 }
-                                DataType::Utf8 => {
-                                    let col = col.as_any().downcast_ref::<StringArray>().unwrap();
-                                    // TODO handle nulls
-                                    csv.push_str(&format!("{}", col.value(i)))
-                                }
-                                _ => unimplemented!()
+                                println!("{}", csv);
                             }
                         }
-                        println!("{}", csv);
+                        println!("-- END RESULT --");
+                    }
+                    Err(e) => {
+                        println!("-- BEGIN ERROR --");
+                        println!("{:?}", e);
+                        println!("-- END ERROR --");
                     }
                 }
                 sql = String::new();
@@ -139,10 +168,12 @@ async fn execute(config: &ExecuteConfig) -> Result<()> {
 async fn data_gen(config: &DataGen) -> Result<()> {
     //TODO randomize the schema and support more types
     let schema = Arc::new(Schema::new(vec![
-        Field::new("c0", DataType::Int32, true),
-        Field::new("c1", DataType::Int32, true),
+        Field::new("c0", DataType::Int8, true),
+        Field::new("c1", DataType::Int8, true),
         Field::new("c2", DataType::Int32, true),
-        Field::new("c3", DataType::Utf8, true),
+        Field::new("c3", DataType::Int32, true),
+        Field::new("c4", DataType::Utf8, true),
+        Field::new("c5", DataType::Utf8, true),
     ]));
 
     let mut rng = rand::thread_rng();
@@ -226,7 +257,10 @@ async fn query_gen(config: &QueryGen) -> Result<()> {
     Ok(())
 }
 
-async fn create_datafusion_context(table: &[PathBuf], verbose: bool) -> Result<(SessionContext, Vec<SQLTable>)> {
+async fn create_datafusion_context(
+    table: &[PathBuf],
+    verbose: bool,
+) -> Result<(SessionContext, Vec<SQLTable>)> {
     let ctx = SessionContext::new();
     let mut sql_tables: Vec<SQLTable> = vec![];
     for path in table {
