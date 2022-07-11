@@ -14,6 +14,7 @@
 
 use datafusion::arrow::array::{Array, Int32Array, Int8Array, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
+use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::logical_plan::JoinType;
 use datafusion::parquet::arrow::ArrowWriter;
 use datafusion::parquet::file::properties::WriterProperties;
@@ -34,7 +35,7 @@ use std::{
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "sqlfuzz", about = "sqlfuzz SQL query generator")]
+#[structopt(name = "sqlfuzz", about = "SQLFuzz: Query Engine Fuzz Testing")]
 enum Config {
     /// Generate random queries
     Query(QueryGen),
@@ -170,65 +171,68 @@ async fn execute(config: &ExecuteConfig) -> Result<()> {
             sql.push('\n');
             if sql.trim().ends_with(';') {
                 println!("{}", sql);
+                println!("-- BEGIN RESULT --");
                 match ctx.sql(&sql).await {
-                    Ok(df) => {
-                        println!("-- BEGIN RESULT --");
-                        let batches = df.collect().await?;
-                        for batch in &batches {
-                            for i in 0..batch.num_rows() {
-                                let mut csv = String::new();
-                                for j in 0..batch.num_columns() {
-                                    if j > 0 {
-                                        csv.push('\t');
-                                    }
-                                    let col = batch.column(j);
-                                    match col.data_type() {
-                                        DataType::Int8 => {
-                                            let col =
-                                                col.as_any().downcast_ref::<Int8Array>().unwrap();
-                                            if col.is_null(i) {
-                                                csv.push_str("null");
-                                            } else {
-                                                csv.push_str(&format!("{}", col.value(i)))
-                                            }
-                                        }
-                                        DataType::Int32 => {
-                                            let col =
-                                                col.as_any().downcast_ref::<Int32Array>().unwrap();
-                                            if col.is_null(i) {
-                                                csv.push_str("null");
-                                            } else {
-                                                csv.push_str(&format!("{}", col.value(i)))
-                                            }
-                                        }
-                                        DataType::Utf8 => {
-                                            let col =
-                                                col.as_any().downcast_ref::<StringArray>().unwrap();
-                                            if col.is_null(i) {
-                                                csv.push_str("null");
-                                            } else {
-                                                csv.push_str(&format!("{}", col.value(i)))
-                                            }
-                                        }
-                                        _ => unimplemented!(),
-                                    }
-                                }
-                                println!("{}", csv);
-                            }
+                    Ok(df) => match df.collect().await {
+                        Ok(batches) => {
+                            print_results(batches);
                         }
-                        println!("-- END RESULT --");
-                    }
+                        Err(e) => {
+                            println!("{:?}", e);
+                        }
+                    },
                     Err(e) => {
-                        println!("-- BEGIN ERROR --");
                         println!("{:?}", e);
-                        println!("-- END ERROR --");
                     }
                 }
+                println!("-- END RESULT --");
                 sql = String::new();
             }
         }
     }
     Ok(())
+}
+
+fn print_results(batches: Vec<RecordBatch>) {
+    for batch in &batches {
+        for i in 0..batch.num_rows() {
+            let mut csv = String::new();
+            for j in 0..batch.num_columns() {
+                if j > 0 {
+                    csv.push('\t');
+                }
+                let col = batch.column(j);
+                match col.data_type() {
+                    DataType::Int8 => {
+                        let col = col.as_any().downcast_ref::<Int8Array>().unwrap();
+                        if col.is_null(i) {
+                            csv.push_str("null");
+                        } else {
+                            csv.push_str(&format!("{}", col.value(i)))
+                        }
+                    }
+                    DataType::Int32 => {
+                        let col = col.as_any().downcast_ref::<Int32Array>().unwrap();
+                        if col.is_null(i) {
+                            csv.push_str("null");
+                        } else {
+                            csv.push_str(&format!("{}", col.value(i)))
+                        }
+                    }
+                    DataType::Utf8 => {
+                        let col = col.as_any().downcast_ref::<StringArray>().unwrap();
+                        if col.is_null(i) {
+                            csv.push_str("null");
+                        } else {
+                            csv.push_str(&format!("{}", col.value(i)))
+                        }
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+            println!("{}", csv);
+        }
+    }
 }
 
 async fn data_gen(config: &DataGen) -> Result<()> {
