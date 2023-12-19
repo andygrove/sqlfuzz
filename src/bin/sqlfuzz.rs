@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use datafusion::arrow::array::{Array, Int32Array, Int8Array, StringArray};
-use datafusion::arrow::datatypes::{DataType, Field, Schema};
+use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::logical_plan::JoinType;
 use datafusion::parquet::arrow::ArrowWriter;
@@ -32,6 +32,8 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use rand::prelude::ThreadRng;
+use rand::Rng;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -235,18 +237,43 @@ fn print_results(batches: Vec<RecordBatch>) {
     }
 }
 
-async fn data_gen(config: &DataGen) -> Result<()> {
-    //TODO randomize the schema and support more types
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("c0", DataType::Int8, true),
-        Field::new("c1", DataType::Int8, true),
-        Field::new("c2", DataType::Int32, true),
-        Field::new("c3", DataType::Int32, true),
-        Field::new("c4", DataType::Utf8, true),
-        Field::new("c5", DataType::Utf8, true),
-    ]));
+fn random_data_type(rng: &mut ThreadRng) -> DataType {
+    let types = vec![
+        DataType::Boolean,
+        DataType::Int8,
+        DataType::Int16,
+        DataType::Int32,
+        DataType::Int64,
+        DataType::Float32,
+        DataType::Float64,
+        DataType::Utf8,
+        DataType::Binary,
+        DataType::Date32,
+        DataType::Time32(TimeUnit::Millisecond),
+        DataType::Timestamp(TimeUnit::Millisecond, None),
+        // Decimal types with different scales
+        DataType::Decimal(9, 2),
+        DataType::Decimal(20, 4),
+        DataType::Decimal(38, 6),
+        DataType::Decimal(45, 8),
+    ];
 
+    types[rng.gen_range(0..types.len())].clone()
+}
+
+fn random_schema(rng: &mut ThreadRng, num_fields: usize) -> Schema {
+    let mut fields = Vec::new();
+    for i in 0..num_fields {
+        let data_type = random_data_type(rng);
+        fields.push(Field::new(&format!("c{}", i), data_type, true));
+    }
+    Schema::new(fields)
+}
+
+async fn data_gen(config: &DataGen) -> Result<()> {
     let mut rng = rand::thread_rng();
+    let schema = Arc::new(random_schema(&mut rng, 9));
+
     let writer_properties = WriterProperties::builder().build();
 
     for i in 0..config.num_files {
@@ -259,6 +286,75 @@ async fn data_gen(config: &DataGen) -> Result<()> {
             ArrowWriter::try_new(file, schema.clone(), Some(writer_properties.clone()))?;
         writer.write(&batch)?;
         writer.close()?;
+    }
+    Ok(())
+}
+
+// TODO: generate sql dml statements to populate tables
+fn create_table_statement(schema: &Schema, table_name: &str) -> String {
+    let columns = schema
+        .fields()
+        .iter()
+        .map(|field| {
+            let column_type = match field.data_type() {
+                DataType::Boolean => "BOOLEAN".to_string(),
+                DataType::Int8 => "TINYINT".to_string(),
+                DataType::Int16 => "SMALLINT".to_string(),
+                DataType::Int32 => "INT".to_string(),
+                DataType::Int64 => "BIGINT".to_string(),
+                DataType::Float32 => "FLOAT".to_string(),
+                DataType::Float64 => "DOUBLE".to_string(),
+                DataType::Utf8 => "STRING".to_string(),
+                DataType::Decimal(precision, scale) => format!("DECIMAL({}, {})", precision, scale),
+                // TODO: more data types
+                _ => unimplemented!(),
+            };
+            format!("{} {}", field.name(), column_type)
+        })
+        .collect::<Vec<String>>()
+        .join(", ");
+
+    format!("CREATE TABLE {} ({});", table_name, columns)
+}
+
+fn create_insert_statements(batch: &RecordBatch, table_name: &str) -> Vec<String> {
+    (0..batch.num_rows()).map(|row_index| {
+        let values = batch
+            .columns()
+            .iter()
+            .map(|column| {
+                // Serialize each value to a SQL-friendly format
+                if column.is_null(row_index) {
+                    "NULL".to_string()
+                } else {
+                    match column.data_type() {
+                        DataType::Utf8 => format!("'{}'", column.as_any().downcast_ref::<StringArray>().unwrap().value(row_index)),
+                        DataType::Int32 => format!("{}", column.as_any().downcast_ref::<Int32Array>().unwrap().value(row_index)),
+                        // TODO: Add cases for other data types
+                        _ => unimplemented!(),
+                    }
+                }
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        format!("INSERT INTO {} VALUES ({});", table_name, values)
+    }).collect()
+}
+
+async fn data_gen_sql(config: &DataGen, table_name: &str) -> Result<()> {
+    let mut rng = rand::thread_rng();
+    let schema = Arc::new(random_schema(&mut rng, 9));
+
+    let table_statement = create_table_statement(&schema, table_name);
+    println!("{}", table_statement); // Output the table creation statement
+
+    let batch = generate_batch(&mut rng, &schema, config.row_count)?;
+    let insert_statements = create_insert_statements(&batch, table_name);
+
+    // Output the insert statements
+    for statement in insert_statements {
+        println!("{}", statement);
     }
     Ok(())
 }
